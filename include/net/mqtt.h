@@ -17,6 +17,12 @@ class Mqtt : public PubSubClient, public MqttConfig {
     bool inputHandled_ = false;
     uint32_t lastConnectionRetry = 0;
     bool connectionAttempted = false;
+    char clientId_[24];
+    char gatewayTopic_[64];
+    bool gatewayOnlinePending_ = true;
+    uint32_t lastGatewayPublish_ = 0;
+    void initializeIdentity();
+    void announceGateway();
     char* subscribedTopics[MQTT_MAX_SUBSCRIPTIONS];
     uint16_t subscribedTopicIdx;
     void resubscribe();
@@ -35,6 +41,10 @@ class Mqtt : public PubSubClient, public MqttConfig {
     void clearSubscriptions();
     bool reconnect(bool=false);
     boolean loop();
+    // Hide the base disconnect so deliberate reconfiguration also publishes Offline.
+    void disconnect();
+    const char* gatewayTopic() const { return gatewayTopic_; }
+    const char* clientId() const { return clientId_; }
     bool hasPendingInput() { return connected() && transport_.available() > 0; }
     bool handledInput() const { return inputHandled_; }
 };

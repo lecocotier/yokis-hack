@@ -25,3 +25,9 @@ Post-STOP integration scenarios are in `poststop_cases.h`: due times, bounded
 retry, priority over periodic polls, queued MQTT STOPs, console STOP, independent
 destinations, RF initialization failures, special RF modes and rollover.
 The MQTT fixture consumes one packet per loop; it is not a live broker test.
+
+Network addition: the production Wi-Fi module is now compiled too. Run
+`bash tests/run_native.sh` (host default -O0; HOST_OPTIMIZATION can override),
+then `python3 tests/check_mqtt_json.py`. Network interfaces remain simulated;
+the declared will is checked at the PubSubClient API, not on a real broker.
+See `doc/network-availability-2026-09-12.md` for target commissioning.

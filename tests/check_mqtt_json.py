@@ -28,3 +28,23 @@ assert detail['raw_response'] == '00 00'
 assert detail['stop_check'] == 'stopped_observed'
 assert detail['stop_check_attempts'] == 1
 print('MQTT JSON valid; 6 Home Assistant template translations passed')
+
+# Validate all generated entity kinds, including maximum supported names.
+for path in [build / 'shutter-discovery.json', *sorted(build.glob('network-discovery-*.json'))]:
+    item = json.loads(path.read_text())
+    assert item['avty_mode'] == 'all'
+    assert 'avty_t' not in item
+    assert len(item['avty']) == 2
+    assert item['avty'][0]['topic'] == '~tele/LWT'
+    assert item['avty'][1]['topic'].startswith('yokis/YokisHack-')
+    assert item['avty'][1]['topic'].endswith('/availability')
+    for availability in item['avty']:
+        assert availability['pl_avail'] == 'Online'
+        assert availability['pl_not_avail'] == 'Offline'
+    assert item['stat_t'] == '~tele/STATE'
+    assert item['dev']['ids'] == [item['uniq_id']]
+    assert item['cmd_t'] == '~cmnd/POWER'
+    assert item['dev']['name'] + '/' == item['~']
+assert detail['state_replayed'] is False
+assert isinstance(detail['status_age_ms'], int)
+print('Network discovery: 5 JSON configurations valid; dual availability and identifiers preserved')

@@ -80,6 +80,8 @@ void registerAllCallbacks() {
                             "Configure WiFi: ssid [psk]; quote arguments containing spaces",
                             wifiConfig));
     g_serial->registerCallback(new GenericCallback(
+        "wifiReconnect", "Reconnect using saved WiFi credentials, without erasing them", wifiReconnect));
+    g_serial->registerCallback(new GenericCallback(
         "wifiDiag", "Display wifi configuration debug info", wifiDiag));
     g_serial->registerCallback(new GenericCallback(
         "wifiReset", "Reset wifi configuration and setup AP mode",
@@ -370,6 +372,8 @@ bool wifiConfig(const char* params) {
     setupWifi(args.at(1), args.at(2)); return true;
 }
 
+bool wifiReconnect(const char*) { return reconnectWifi() == WL_CONNECTED; }
+
 bool wifiDiag(const char* params) {
     WiFi.printDiag(LOG);
     LOG.print("Yokis-Hack IP: ");
@@ -383,6 +387,9 @@ bool wifiDiag(const char* params) {
 }
 
 bool restart(const char* params) {
+#ifdef MQTT_ENABLED
+    if (g_mqtt) g_mqtt->disconnect();
+#endif
     ESP.restart();
     return true;
 }
@@ -402,6 +409,9 @@ bool mqttConfig(const char* params) {
 bool mqttDiag(const char* params) {
     LOG.println("Current MQTT configuration:");
     g_mqtt->printDebug(LOG);
+    LOG.print("Client ID: "); LOG.println(g_mqtt->clientId());
+    LOG.print("Gateway availability topic: "); LOG.println(g_mqtt->gatewayTopic());
+    LOG.print("HA refresh pending: "); LOG.println(g_mqtt->refreshPending());
     return true;
 }
 

@@ -2,7 +2,9 @@ name: Verify reliability fixes
 
 on:
   push:
-    branches: ["fix/shutter-reliability-2026-09-12"]
+    branches: ["master", "fix/**"]
+  pull_request:
+    branches: ["master"]
   workflow_dispatch:
 
 permissions:
