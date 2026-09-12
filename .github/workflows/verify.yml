@@ -1,0 +1,39 @@
+name: Verify reliability fixes
+
+on:
+  push:
+    branches: ["fix/shutter-reliability-2026-09-12"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive exact tested sources
+        run: git archive --format=zip -o source-snapshot.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: source-snapshot.zip
+          retention-days: 7
+      - name: Native regression tests
+        run: |
+          if test -f tests/run_native.sh; then bash tests/run_native.sh; fi
+      - name: Install PlatformIO
+        run: python3 -m pip install platformio==6.1.18
+      - name: Compile ESP8266 and Arduino Mega (no upload)
+        run: pio run -e d1_mini -e megaatmega2560
+      - name: Keep firmware build outputs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-builds-not-hardware-validated
+          path: |
+            .pio/build/d1_mini/firmware.bin
+            .pio/build/megaatmega2560/firmware.hex
+          retention-days: 14
