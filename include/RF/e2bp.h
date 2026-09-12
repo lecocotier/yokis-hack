@@ -26,9 +26,12 @@ enum PayloadType {
 class E2bp : public RFConfigurator {
    private:
     Device *device;
-    bool loopContinue;
+    volatile bool loopContinue;
+    bool radioReady;
+    bool receivedResponse;
+    uint16_t txCycles;
     DeviceStatus firstPayloadStatus, secondPayloadStatus;
-    char answerBuf[2];
+    uint8_t answerBuf[2];
 
     bool setDeviceStatus(DeviceStatus);
     uint8_t *getPayload(uint8_t *, PayloadType);
@@ -73,6 +76,9 @@ class E2bp : public RFConfigurator {
     bool release();
     // press and hold for a specific duration (ms)
     bool pressAndHoldFor(unsigned long);
+    bool hasResponse() const { return receivedResponse; }
+    uint16_t getTxCycles() const { return txCycles; }
+    const uint8_t* getRawResponse() const { return answerBuf; }
     DeviceStatus getLastKnownDeviceStatus();
     // Get the device status (ON or OFF) - experimental !
     DeviceStatus pollForStatus();

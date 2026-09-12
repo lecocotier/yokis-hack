@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "reliability.h"
 
 #include "RF/copy.h"
 #include "RF/e2bp.h"
@@ -22,10 +23,10 @@
 #endif
 
 // static irqType initialization
-IrqType IrqManager::irqType = PAIRING;
+volatile IrqType IrqManager::irqType = PAIRING;
 
 // globals' initialization
-byte g_ConfigFlags = ~FLAG_RAW & ~FLAG_DEBUG & FLAG_POLLING;
+byte g_ConfigFlags = FLAG_POLLING;
 SerialHelper* g_serial;
 Pairing* g_pairingRF;
 E2bp* g_bp;
@@ -148,42 +149,36 @@ void setup() {
 void loop() {
 #if defined(ESP8266)
     LOG.handle(); // telnetspy handling
+    webserver.processPending();
     ArduinoOTA.handle();
 
     #if defined(MQTT_ENABLED)
     g_mqtt->loop();
 
-    uint8_t nbDevices = 0;
     if (g_mqtt->connected() && !g_mqtt->isDiscoveryDone()) {
-        LOG.print("Publishing homeassistant discovery data... ");
-        for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
-            if (g_devices[i] != NULL) {
-                nbDevices++;
-                if (g_mqtt->publishDevice(g_devices[i])) {
-                    g_mqtt->subscribeDevice(g_devices[i]);
-                } else {
-                    LOG.println("KO");
-                    break;
-                }
+        bool complete = true;
+        for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
+            if (g_devices[i] && (!g_mqtt->publishDevice(g_devices[i]) ||
+                                !g_mqtt->subscribeDevice(g_devices[i]))) {
+                complete = false; break;
             }
         }
-
-        if (nbDevices == 0) g_mqtt->setDiscoveryDone(true);
-
-        if (g_mqtt->isDiscoveryDone()) LOG.println("OK");
-
-    } else if (g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
-        // Verify polling statuses and update via MQTT if needed
-        for (uint8_t i = 0;
-             i < MQTT_MAX_NUM_OF_YOKIS_DEVICES && FLAG_IS_ENABLED(FLAG_POLLING);
-             i++) {
-            if (g_devices[i] != NULL && g_devices[i]->needsPolling()) {
-                pollForStatus(g_devices[i]);
+        g_mqtt->setDiscoveryDone(complete);
+    } else if (g_mqtt->connected() && FLAG_IS_ENABLED(FLAG_POLLING)) {
+        // One poll per main-loop iteration: queued commands get serviced
+        // between devices instead of waiting through up to 64 timeouts.
+        static uint8_t next = 0;
+        for (uint8_t n = 0; n < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++n) {
+            uint8_t i = next;
+            next = (next + 1) % MQTT_MAX_NUM_OF_YOKIS_DEVICES;
+            if (g_devices[i] && g_devices[i]->needsPolling()) {
+                pollForStatus(g_devices[i]); break;
             }
         }
     }
 #endif // MQTT_ENABLED
 #endif // ESP8266
+    if (IrqManager::irqType == SCANNER) g_scanner->service();
     g_serial->readFromSerial();
     delay(1);
 }
@@ -191,11 +186,12 @@ void loop() {
 
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 void pollForStatus(Device* d) {
+    if (!d || d->getMode() == NO_RCPT) return;
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
     DeviceStatus ds = g_bp->pollForStatus();
     
-    if (ds != UNDEFINED) {  // device reachable
+    if (g_bp->hasResponse()) {  // reachability is separate from decoding
         if (d->getFailedPollings() > 0) {
             LOG.print("Device ");
             LOG.print(d->getName());
@@ -241,103 +237,44 @@ void pollForStatus(Device* d) {
 
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-    char* tok;
-    char* mTokBuf = NULL;
-    char* mTopic = NULL;
-    char* mCmnd = NULL;
-    char* mPayload = NULL;
-    Device* d;
-    size_t len;
-
-    // Topic copy
-    len = strlen(topic);
-    mTopic = new char[len + 1];
-    strncpy(mTopic, topic, len);
-    mTopic[len] = 0;
-
-    // Get device
-    mTokBuf = new char[len + 1];
-    strncpy(mTokBuf, mTopic, len);
-    mTokBuf[len] = 0;
-    tok = strtok(mTokBuf, "/");  // device name
-    d = Device::getFromList(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, tok);
-
-    // If we update this device too soon, ignore the payload
-    unsigned long now = millis();
-    if (d->getLastUpdateMillis() + MQTT_UPDATE_MILLIS_WINDOW > now) {
-        LOG.println(
-            "Ignoring MQTT message: received too soon for this device");
-        LOG.print("Last update: ");
-        LOG.println(d->getLastUpdateMillis(), DEC);
-        LOG.print("This update: ");
-        LOG.println(now, DEC);
-        LOG.print("Difference: ");
-        LOG.println(now - d->getLastUpdateMillis());
-
-        delete[] mTopic;
-        delete[] mTokBuf;
-        return;
+    Yokis::MqttRequest request;
+    if (!Yokis::parseMqtt(topic, payload, length, request)) {
+        LOG.println("MQTT command rejected: invalid topic or payload"); return;
     }
-
-    // Get cmnd type (POWER or BRIGHTNESS)
-    tok = strtok(NULL, "/");  // cmnd
-    tok = strtok(NULL, "/");  // POWER or BRIGHTNESS
-    len = strlen(tok);
-    mCmnd = new char[len + 1];
-    strncpy(mCmnd, tok, len);
-    mCmnd[len] = 0;
-
-    // Get payload
-    mPayload = new char[length + 1];
-    strncpy(mPayload, (char*)payload, length);  // consider payload as char*
-    mPayload[length] = 0;
-
-    // Processing MQTT message
+    Device* d = Device::getFromList(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, request.device);
+    if (!d || !d->isConfigured() || (request.brightness && d->getMode() != DIMMER) ||
+        (request.command == Yokis::Stop && d->getMode() != SHUTTER)) {
+        LOG.println("MQTT command rejected: unknown device or unsupported command"); return;
+    }
+    if (d->getMode() != SHUTTER && d->isDuplicateCommand(request.command, millis())) {
+        LOG.println("MQTT duplicate of the same acknowledged command ignored"); return;
+    }
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
-    switch (d->getMode()) {
-        case ON_OFF:
-        case SHUTTER:
-        case NO_RCPT:
-            if (strcmp(mPayload, "ON") == 0) {
-                g_bp->on();
-            } else if (strcmp(mPayload, "OFF") == 0) {
-                g_bp->off();
-            } else if (strcmp(mPayload, "PAUSE") == 0) {
-                g_bp->pauseShutter();
-            }
-            g_mqtt->notifyPower(d);
-            break;
-        case DIMMER:
-            // brightness will be 0 for anything that is not a number
-            // so will set light to OFF for all possible POWER cases (ON OR
-            // OFF) HASS will send only POWER OFF, never POWER ON because
-            // on_command_type=brightness set on MQTT configuration (see
-            // MqttHass class)
-            int brightness = (uint8_t)atoi(mPayload);
-
-            switch (brightness) {
-                case BRIGHTNESS_OFF:
-                    g_bp->off();
-                    break;
-                case BRIGHTNESS_MIN:
-                    g_bp->dimmerMin();
-                    break;
-                case BRIGHTNESS_MID:
-                    g_bp->dimmerMid();
-                    break;
-                default:  // MAX values
-                    g_bp->on();
-                    break;
-            }
-
-            g_mqtt->notifyBrightness(d);
-            break;
+    bool ok = false;
+    switch (request.command) {
+        case Yokis::PowerOn: ok = g_bp->on(); break;
+        case Yokis::PowerOff: case Yokis::DimmerOff: ok = g_bp->off(); break;
+        case Yokis::Stop: ok = g_bp->pauseShutter(); break;
+        case Yokis::DimmerMin: ok = g_bp->dimmerMin(); break;
+        case Yokis::DimmerMid: ok = g_bp->dimmerMid(); break;
+        case Yokis::DimmerMax: ok = g_bp->dimmerMax(); break;
+        default: return;
     }
-
-    delete[] mTopic;
-    delete[] mTokBuf;
-    delete[] mCmnd;
-    delete[] mPayload;
+    LOG.print("RF command "); LOG.print(d->getName());
+    LOG.print(ok ? " completed; " : " unconfirmed; ");
+    LOG.print("response="); LOG.print(g_bp->hasResponse() ? "yes" : "no");
+    LOG.print(" cycles="); LOG.println(g_bp->getTxCycles());
+    if (ok) {
+        // Only a command updates this history. Polls do not; failures do not.
+        if (g_bp->hasResponse()) d->acknowledgeCommand(request.command, millis());
+        if (g_bp->hasResponse() && d->isOffline()) { d->online(); g_mqtt->notifyOnline(d); }
+    } else {
+        d->setStatus(UNDEFINED); // never publish the intended motion as proven
+    }
+    if (d->getMode() == DIMMER) {
+        if (ok) g_mqtt->notifyBrightness(d);
+        else g_mqtt->notifyPower(d, UNDEFINED);
+    } else g_mqtt->notifyPower(d);
 }
-#endif  // #if defined(ESP8266) && defined(MQTT_ENABLED)
+#endif  // ESP8266 && MQTT_ENABLED

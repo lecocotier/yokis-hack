@@ -9,7 +9,7 @@ enum IrqType { PAIRING, E2BP, SCANNER, COPYING };
 // IrqManager manages IRQ interrupt raised by NRF chip's IRQ pin
 class IrqManager {
    public:
-    static IrqType irqType;
+    static volatile IrqType irqType;
     static void processIRQ();
 };
 

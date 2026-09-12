@@ -13,6 +13,7 @@ class RFConfigurator : public RF24_forked {
 
    public:
     RFConfigurator(uint16_t cepin, uint16_t cspin);
+    virtual ~RFConfigurator() {}
     // Callback for interrupt when TX_DS bit is set
     virtual void interruptTxOk() = 0;
     // Callback for interrupt when RX_DR bit is set

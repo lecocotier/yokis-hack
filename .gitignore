@@ -6,3 +6,6 @@
 .vscode/ipch
 *.swp
 *.swo
+
+/tests/build/
+/source-snapshot.zip

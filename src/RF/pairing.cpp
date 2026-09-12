@@ -1,6 +1,7 @@
 #include "RF/pairing.h"
 #include <Arduino.h>
 #include "globals.h"
+#include "reliability.h"
 
 // Constants' declaration
 const byte Pairing::pairingAddress[] = {0xbe, 0xbe, 0xbe, 0xbe, 0xbe};
@@ -15,18 +16,19 @@ void Pairing::reset() {
     this->recvBufferAddr = this->recvBuffer;
     memset(this->recvBuffer, 0, 8);
     this->readsCount = 0;
-    this->timeout = HACK_TIMEOUT;
+
 }
 
 bool Pairing::hackPairing() {
     reset();
-    timeout = millis() + HACK_TIMEOUT;
+    uint32_t phaseStart = millis();
+    bool firstReceived = false;
 
     if (!FLAG_IS_ENABLED(FLAG_RAW) || FLAG_IS_ENABLED(FLAG_DEBUG)) {
         LOG.println("Hack started, click on the connect button when ready");
     }
 
-    begin();
+    if (!begin()) return false;
     setupRFModule();
 
     if (FLAG_IS_ENABLED(FLAG_DEBUG)) {
@@ -36,11 +38,16 @@ bool Pairing::hackPairing() {
     LOG.print("Waiting... timeout=");
     LOG.println(HACK_TIMEOUT);
 
-    while (millis() < timeout && readsCount < 2) {
+    while (readsCount < 2) {
+        if (readsCount && !firstReceived) { firstReceived = true; phaseStart = millis(); }
+        if (Yokis::elapsed(millis(), phaseStart, firstReceived ? 1000 : HACK_TIMEOUT)) break;
         delay(10);
     }
+    ce(LOW);
 
     if (readsCount >= 2) {
+        _debugPrintRecv(recvBuffer, 3);
+        _debugPrintRecv(recvBuffer + 3, 5);
         printPairingInfo();
         return true;
     }
@@ -61,7 +68,7 @@ void Pairing::setupRFModule() {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Pairing::prepareForReading(uint8_t payloadSize) {
     setPayloadSize(payloadSize);
@@ -70,53 +77,28 @@ void Pairing::prepareForReading(uint8_t payloadSize) {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
-void Pairing::interruptTxOk() {
-    LOG.println("TX sent interrupt");
-}
-
+void Pairing::interruptTxOk() {}
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Pairing::interruptRxReady() {
-    // LOG.println("Pairing RX received");
-    if (available()) {
-        readsCount++;
-        read(recvBufferAddr, getPayloadSize());
-        _debugPrintRecv(recvBufferAddr, getPayloadSize());
-
-        // prepare for next packet which should arrive right after this one
-        if (getPayloadSize() == 3) {
-            // after receiving first packet, next one should be following
-            // quickly ...
-            // millis is ok in interrupts but won't be updated
-            // That's ok for this case
-            timeout = millis() + 1000;
-            recvBufferAddr += getPayloadSize();
-            prepareForReading(5);
-        }
-    }
+    if (readsCount >= 2 || !available()) return;
+    uint8_t count = readsCount;
+    read(recvBuffer + (count ? 3 : 0), count ? 5 : 3);
+    if (!count) prepareForReading(5); // timing-critical, no logging here
+    else ce(LOW);
+    readsCount = count + 1; // publish only after the bytes are stored
 }
-
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
-void Pairing::interruptTxFailed() {
-    //LOG.println("TX sent failed interrupt");
-}
-
-#if defined(ESP8266)
-ICACHE_RAM_ATTR
-#endif
-void Pairing::_debugPrintRecv(byte* recvBuf, uint8_t s) {
-    if (!FLAG_IS_ENABLED(FLAG_DEBUG)) return;
-
+void Pairing::interruptTxFailed() {}
+void Pairing::_debugPrintRecv(byte* recvBuf, uint8_t size) {
+    if (!IS_DEBUG_ENABLED) return;
     LOG.print("Buffer data: ");
-    for (uint8_t i = 0; i < s; i++) {
-        LOG.print(recvBuf[i], HEX);
-        LOG.print(" ");
-    }
+    for (uint8_t i = 0; i < size; ++i) { LOG.print(recvBuf[i], HEX); LOG.print(" "); }
     LOG.println();
 }
 
@@ -158,7 +140,7 @@ void Pairing::_printPairingInfoRaw() {
     byte channel = getChannelFromRecvData();
     getAddressFromRecvData(addr);
 
-    sprintf(buf, "address=%02x%02x%02x%02x%02x,channel=%02x", addr[0], addr[1],
+    snprintf(buf, sizeof(buf), "address=%02x%02x%02x%02x%02x,channel=%02x", addr[0], addr[1],
             addr[2], addr[3], addr[4], channel);
     LOG.println(buf);
 }
@@ -172,7 +154,7 @@ void Pairing::_printPairingInfoFormat() {
     LOG.println("Here are the info got from the device:");
 
     LOG.print("  Address: ");
-    sprintf(buf, "%02x %02x %02x %02x %02x", addr[0], addr[1], addr[2], addr[3],
+    snprintf(buf, sizeof(buf), "%02x %02x %02x %02x %02x", addr[0], addr[1], addr[2], addr[3],
             addr[4]);
     LOG.println(buf);
 

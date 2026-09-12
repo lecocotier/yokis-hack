@@ -7,10 +7,12 @@
 class Scanner : public E2bp {
    private:
     uint8_t buf[32];
+    volatile bool rxPending = false;
 
    public:
     Scanner(uint16_t, uint16_t);
     void setupRFModule() override;
+    void service();
     void interruptTxOk() override;
     void interruptRxReady() override;
     void interruptTxFailed() override;

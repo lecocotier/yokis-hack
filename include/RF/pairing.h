@@ -15,12 +15,11 @@
 
 class Pairing : public RFConfigurator {
    private:
-    uint8_t readsCount;
+    volatile uint8_t readsCount;
     void _printPairingInfoRaw();
     void _printPairingInfoFormat();
 
    protected:
-    unsigned long timeout;
     uint8_t* recvBufferAddr;
     uint8_t recvBuffer[8];
     static const byte pairingAddress[5];

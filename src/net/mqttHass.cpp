@@ -29,10 +29,10 @@ void MqttHass::setDiscoveryDone(bool status) {
 // Get JSON message to publish for HASS discovery
 char* MqttHass::newMessageJson(const Device* device, char* buf) {
     if (device->getMode() == DIMMER) {
-        sprintf(buf,
+        snprintf(buf, MQTT_MAX_PACKET_SIZE,
                 "{"
                 "\"name\":\"%s dimmer\","
-                "\"optimistic\":\"false\","  // if false, cannot know the status
+                "\"optimistic\":false,"  // if false, cannot know the status
                                              // of the device
                 "\"on_command_type\":\"brightness\","  // only send brightness
                 "\"bri_cmd_t\":\"~cmnd/BRIGHTNESS\","
@@ -42,7 +42,7 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
                 "\"cmd_t\":\"~cmnd/POWER\","
                 "\"pl_off\":\"OFF\","
                 "\"state_topic\":\"~tele/STATE\","
-                "\"val_tpl\":\"{{value_json.POWER}}\","
+                "\"state_value_template\":\"{{value_json.POWER}}\","
                 "\"avty_t\":\"~tele/LWT\","
                 "\"pl_avail\":\"Online\","
                 "\"pl_not_avail\":\"Offline\","
@@ -58,10 +58,10 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
                 device->getName(), device->getName(), device->getName(),
                 device->getName(), device->getName());
         } else if (device->getMode() == SHUTTER) {
-        sprintf(buf,
+        snprintf(buf, MQTT_MAX_PACKET_SIZE,
                 "{"
                 "\"name\":\"Shutter %s\","
-                "\"optimistic\":\"false\","  // if false, cannot know the status
+                "\"optimistic\":false,"  // if false, cannot know the status
                                              // of the device
                 "\"cmd_t\":\"~cmnd/POWER\","
                 "\"state_topic\":\"~tele/STATE\","
@@ -86,14 +86,14 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
                 device->getName(), device->getName(), device->getName(),
                 device->getName(), device->getName());
         } else {
-        sprintf(buf,
+        snprintf(buf, MQTT_MAX_PACKET_SIZE,
                 "{"
                 "\"name\":\"%s switch\","
-                "\"optimistic\":\"false\","  // if false, cannot know the status
+                "\"optimistic\":false,"  // if false, cannot know the status
                                              // of the device
                 "\"cmd_t\":\"~cmnd/POWER\","
                 "\"state_topic\":\"~tele/STATE\","
-                "\"val_tpl\":\"{{value_json.POWER}}\","
+                "\"state_value_template\":\"{{value_json.POWER}}\","
                 "\"pl_off\":\"OFF\","
                 "\"pl_on\":\"ON\","
                 "\"avty_t\":\"~tele/LWT\","
@@ -117,9 +117,9 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
 
 char* MqttHass::newPublishTopic(const Device* device, char* buf) {
     if (device->getMode() == SHUTTER) { 
-        sprintf(buf, "%s/cover/%s/config", HASS_PREFIX, device->getName());
+        snprintf(buf, 96, "%s/cover/%s/config", HASS_PREFIX, device->getName());
     } else {
-        sprintf(buf, "%s/light/%s/config", HASS_PREFIX, device->getName());
+        snprintf(buf, 96, "%s/light/%s/config", HASS_PREFIX, device->getName());
     }
     return buf;
 }
@@ -130,6 +130,7 @@ bool MqttHass::publishDevice(const Device* device) {
     char topic[128];
     char payload[MQTT_MAX_PACKET_SIZE];
 
+    if (!device || !device->isConfigured()) return false;
     newPublishTopic(device, topic);
     newMessageJson(device, payload);
 
@@ -143,17 +144,14 @@ bool MqttHass::publishDevice(const Device* device) {
         notifyOnline(device);
     }
 
-    if(ret) {
-        setDiscoveryDone(true);
-    }
 
     return ret;
 }
 
 void MqttHass::notifyAvailability(const Device* device, const char* status) {
-    char buf[64];
+    char buf[96];
 
-    sprintf(buf, "%s/tele/LWT", device->getName());
+    snprintf(buf, 96, "%s/tele/LWT", device->getName());
     publish(buf, status, true);
 }
 
@@ -170,40 +168,38 @@ void MqttHass::notifyPower(const Device* device) {
 }
 
 void MqttHass::notifyPower(const Device* device, DeviceStatus ds) {
-    char buf[64];
+    char buf[96];
     char bufPayload[64];
 
-    sprintf(buf, "%s/tele/STATE", device->getName());
-    sprintf(bufPayload, "{\"POWER\":\"%s\"}", Device::getStatusAsString(ds));
+    snprintf(buf, 96, "%s/tele/STATE", device->getName());
+    sprintf(bufPayload, "{\"POWER\":\"%s\"}", (device->getMode() == SHUTTER && ds == UNDEFINED) ? "None" : Device::getStatusAsString(ds));
     publish(buf, bufPayload, false);
 }
 
 void MqttHass::notifyBrightness(const Device* device) {
-    char buf[64];
+    char buf[96];
     char bufPayload[64];
 
     notifyPower(device, (device->getBrightness() == BRIGHTNESS_OFF ? OFF : ON));
 
-    sprintf(buf, "%s/tele/BRIGHTNESS", device->getName());
+    snprintf(buf, 96, "%s/tele/BRIGHTNESS", device->getName());
     sprintf(bufPayload, "{\"BRIGHTNESS\":\"%d\"}", device->getBrightness());
     publish(buf, bufPayload, false);
 }
 
 // Subscribe device to be able to be controlled over MQTT
-void MqttHass::subscribeDevice(const Device* device) {
-    char buf[64];
-
-    if (device->getMode() == ON_OFF || device->getMode() == NO_RCPT) {
-        sprintf(buf, "%s/cmnd/POWER", device->getName());
-        this->subscribe(buf);
-    } else if (device->getMode() == DIMMER) {
-        sprintf(buf, "%s/cmnd/POWER", device->getName());
-        this->subscribe(buf);
-        sprintf(buf, "%s/cmnd/BRIGHTNESS", device->getName());
-        this->subscribe(buf);
-    } else if (device->getMode() == SHUTTER) {
-        sprintf(buf, "%s/cmnd/POWER", device->getName());
-        this->subscribe(buf);
+bool MqttHass::subscribeDevice(const Device* device) {
+    if (!device || !device->isConfigured()) return false;
+    char topic[96];
+    snprintf(topic, sizeof(topic), "%s/cmnd/POWER", device->getName());
+    bool ok = subscribe(topic);
+    if (device->getMode() == DIMMER) {
+        snprintf(topic, sizeof(topic), "%s/cmnd/BRIGHTNESS", device->getName());
+        ok = subscribe(topic) && ok;
     }
+    return ok;
+}
+void MqttHass::removeDiscovery(const Device* device) {
+    char topic[128]; newPublishTopic(device, topic); publish(topic, "", true);
 }
 #endif

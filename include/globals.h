@@ -69,6 +69,10 @@ extern "C" {
 
 #define DEVICE_MAX_FAILED_POLLING_BEFORE_OFFLINE 3
 
+#ifndef MQTT_MAX_NUM_OF_YOKIS_DEVICES
+#define MQTT_MAX_NUM_OF_YOKIS_DEVICES 64
+#endif
+
 // Global config flags
 extern byte g_ConfigFlags;
 // Global vars for all NRF manipulations

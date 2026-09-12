@@ -1,19 +1,8 @@
 #ifdef ESP8266
-
 #include "storage/yokisLittleFS.h"
-
 bool YokisLittleFS::initialized = false;
-
-// static
-void YokisLittleFS::init() {
-    if (!YokisLittleFS::initialized) {
-        /*
-        LittleFSConfig cfg;
-        cfg.setAutoFormat(false);
-        LittleFS.setConfig(cfg);
-        */
-        YokisLittleFS::initialized = LittleFS.begin();
-    }
+bool YokisLittleFS::init() {
+    if (!initialized) initialized = LittleFS.begin();
+    return initialized;
 }
-
-#endif // ESP8266
+#endif

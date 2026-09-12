@@ -7,6 +7,7 @@ class SerialCallback {
     const char* help;
 
    public:
+    virtual ~SerialCallback() {}
     virtual bool commandCallback(const char*) = 0;
 
     SerialCallback(const char* command, const char* help) {

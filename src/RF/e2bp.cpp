@@ -1,22 +1,21 @@
 #include "RF/e2bp.h"
 #include "globals.h"
 #include "utils.h"
+#include "reliability.h"
 
-E2bp::E2bp(uint16_t cepin, uint16_t cspin) : RFConfigurator(cepin, cspin) {
-    device = new Device("e2bp");
-    this->firstPayloadStatus = UNDEFINED;
-    this->secondPayloadStatus = UNDEFINED;
+E2bp::E2bp(uint16_t cepin, uint16_t cspin) : RFConfigurator(cepin, cspin), device(NULL) {
+    radioReady = false; reset();
 }
-
-E2bp::~E2bp() { delete device; }
-
+// Device is borrowed from the configured list, never owned by this radio helper.
+E2bp::~E2bp() {}
 void E2bp::reset() {
-    this->firstPayloadStatus = UNDEFINED;
-    this->secondPayloadStatus = UNDEFINED;
-    this->loopContinue = true;
+    firstPayloadStatus = secondPayloadStatus = UNDEFINED;
+    loopContinue = true; receivedResponse = false; txCycles = 0;
+    memset(answerBuf, 0, sizeof(answerBuf));
 }
-
-void E2bp::setDevice(Device* device) { this->device = device; }
+void E2bp::setDevice(Device* d) {
+    device = d; radioReady = false; reset();
+}
 
 const Device* E2bp::getDevice() { return this->device; }
 
@@ -40,8 +39,10 @@ DeviceStatus E2bp::getLastKnownDeviceStatus() {
 bool E2bp::setDeviceStatus(DeviceStatus ds) {
     uint8_t buf[PAYLOAD_LENGTH];
 
+    if (!device || !device->isConfigured()) return false;
     reset();
     setupRFModule();
+    if (!radioReady) return false;
     // For all devices, use the on or off payload except for shutters
     if(device->getMode() == SHUTTER ) {
         if (ds == SHUTTER_STOPPED) {
@@ -50,14 +51,16 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
             getPayload(buf, PL_SHUTTEROPENING);
         } else if (ds == SHUTTER_CLOSING) {
             getPayload(buf, PL_SHUTTERCLOSING);
+        } else {
+            return false;
         }
     } else {
         getPayload(buf, ds == ON ? PL_ON : PL_OFF);
     }
 
     bool ret = false;
-    unsigned long timeout = millis() + 1000;
-    while (millis() <= timeout && !ret) ret = sendPayload(buf);
+    const uint32_t start = millis();
+    do { ret = sendPayload(buf); } while (!ret && device->getMode() != NO_RCPT && !Yokis::elapsed(millis(), start, 1000));
 
     if (ret || device->getMode() == NO_RCPT) {  // if NO_RCPT, ignore ret
         device->setStatus(ds);
@@ -69,10 +72,11 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
         }
     }
 
-    return ret;
+    return ret || device->getMode() == NO_RCPT;
 }
 
 bool E2bp::on() { 
+    if (!device) return false;
     if(device->getMode() == SHUTTER ) {
         return setDeviceStatus(SHUTTER_OPENING);
     } else {
@@ -81,6 +85,7 @@ bool E2bp::on() {
 }
 
 bool E2bp::off() { 
+    if (!device) return false;
     if(device->getMode() == SHUTTER ) {
         return setDeviceStatus(SHUTTER_CLOSING);
     } else {
@@ -88,7 +93,9 @@ bool E2bp::off() {
     }
 }
 
-bool E2bp::pauseShutter() { return setDeviceStatus(SHUTTER_STOPPED); }
+bool E2bp::pauseShutter() {
+    return device && device->getMode() == SHUTTER && setDeviceStatus(SHUTTER_STOPPED);
+}
 
 // Toggle a device
 // This function emulates a normal operated e2bp.
@@ -96,12 +103,21 @@ bool E2bp::pauseShutter() { return setDeviceStatus(SHUTTER_STOPPED); }
 // communication between devices. To toggle, it's actually better to get
 // status first and invert it.
 bool E2bp::toggle() {
-    unsigned long timeout = millis() + 1000;
+    if (!device || !device->isConfigured()) return false;
+    const uint32_t start = millis();
     bool retPress = false, retRelease = false;
 
     reset();
     setupRFModule();
-    while (millis() <= timeout) {
+    if (!radioReady) return false;
+    if (device->getMode() == SHUTTER) {
+        // On the captured shutter protocol, 0x53 after 0x35 stops movement.
+        // Send one toggle, not a repeated press/release train that cancels it.
+        bool ok = press();
+        if (ok) device->setStatus(UNDEFINED); // direction is not known here
+        return ok;
+    }
+    while (!Yokis::elapsed(millis(), start, 1000)) {
         retPress = press();
         if (device->getMode() == DIMMER)
             delay(100);  // No need to wait for on/off devices
@@ -146,7 +162,7 @@ bool E2bp::dimmerMid() { return dimmerSet(3); }
 bool E2bp::dimmerMin() { return dimmerSet(4); }
 bool E2bp::dimmerNiL() { return dimmerSet(7); }
 bool E2bp::dimmerSet(const uint8_t number) {
-    if (device->getMode() != DIMMER) {
+    if (!device || device->getMode() != DIMMER) {
         LOG.println("Not a dimmer device, ignoring.");
         return false;
     }
@@ -166,8 +182,7 @@ bool E2bp::dimmerSet(const uint8_t number) {
     // 4 = min
     if (number > 1 && ret)
         device->setStatus(ON);
-    else if (number == 1 && ret)
-        device->toggleStatus();
+    // toggle() has already updated the state for a single pulse.
 
     if (ret) {
         switch (number) {
@@ -195,6 +210,7 @@ DeviceStatus E2bp::pollForStatus() {
     uint8_t buf[PAYLOAD_LENGTH];
     reset();
     setupRFModule();
+    if (!radioReady) return UNDEFINED;
     getPayload(buf, PL_STATUS);
     sendPayload(buf);
     return firstPayloadStatus;
@@ -203,23 +219,15 @@ DeviceStatus E2bp::pollForStatus() {
 // Get device mode from previous received data from the device
 // This way of detecting devices is not working. Shutter devices may return various values.
 DeviceMode E2bp::getDeviceModeFromRecvData() {
-    switch (answerBuf[0]) {
-        case 0:
-            return ON_OFF;
-        case 1:
-            return DIMMER;
-        // YOKIS MVR500ER - 1F - 42 ou 2F - 42
-        case 0x1e:
-        case 0x2f:
-            return SHUTTER;
-        default:
-            return NO_RCPT;
-    }
+    // A status byte is not a product identifier. Retain the configured type.
+    return device ? device->getMode() : ON_OFF;
 }
 
 bool E2bp::press() { return press(false); }
 
 bool E2bp::press(bool dim) {
+    if (!device || !device->isConfigured() || !radioReady) return false;
+    secondPayloadStatus = UNDEFINED;
     bool ret = true;
     if (IS_DEBUG_ENABLED) LOG.println("Button pressing");
     uint8_t buf[PAYLOAD_LENGTH];
@@ -236,6 +244,7 @@ bool E2bp::press(bool dim) {
 }
 
 bool E2bp::release() {
+    if (!device || !device->isConfigured() || !radioReady) return false;
     bool ret = true;
     if (IS_DEBUG_ENABLED) LOG.println("Button releasing");
     uint8_t buf[PAYLOAD_LENGTH];
@@ -258,14 +267,14 @@ bool E2bp::release() {
 // release() has not been called
 bool E2bp::pressAndHoldFor(unsigned long duration) {
     // Only for dimmers and must be > 700ms
-    if (device->getMode() != DIMMER || duration <= 700) return false;
+    if (!device || device->getMode() != DIMMER || duration <= 700 || duration > 600000) return false;
 
     reset();
     setupRFModule();
-    press();
+    if (!radioReady || !press()) return false;
 
-    unsigned long timeout = millis() + duration;
-    unsigned long startTime = millis();
+    const uint32_t holdStart = millis();
+    uint32_t startTime = holdStart;
     // Every second until timeout, send a dim command
     do {
         // send payload every 1 second
@@ -277,11 +286,11 @@ bool E2bp::pressAndHoldFor(unsigned long duration) {
         }
         yield();
         delayMicroseconds(1000);  // 1 ms delay
-    } while (millis() <= timeout);
+    } while (!Yokis::elapsed(millis(), holdStart, uint32_t(duration)));
 
     bool ret = release();
     // no brightness level available but device is ON
-    device->setBrightness(BRIGHTNESS_MAX);
+    if (ret) device->setBrightness(BRIGHTNESS_MAX);
     return ret;
 }
 
@@ -333,6 +342,7 @@ uint8_t* E2bp::getPayload(uint8_t* buf, PayloadType type) {
 }
 
 bool E2bp::sendPayload(const uint8_t* payload) {
+    if (!device || !device->isConfigured() || !radioReady || !payload) return false;
     if (IS_DEBUG_ENABLED) {
         LOG.print("Payload: ");
         for (uint8_t i = 0; i < 9; i++) {
@@ -347,7 +357,8 @@ bool E2bp::sendPayload(const uint8_t* payload) {
 }
 
 void E2bp::setupRFModule() {
-    begin();
+    radioReady = device && device->isConfigured() && begin();
+    if (!radioReady) { LOG.println("RF initialization failed or device not configured"); return; }
     write_register(RF_CH, device->getChannel());
     // setChannel(device->getChannel());
 
@@ -385,12 +396,15 @@ void E2bp::setupRFModule() {
 }
 
 bool E2bp::runMainLoop() {
-    unsigned long timeout = millis() + MAIN_LOOP_TIMEOUT_MILLIS;
+    const uint32_t start = millis();
+    receivedResponse = false;
     uint8_t nbLoops = 0;
 
     ce(LOW);
     // while not interrupted by RX, timeout or by device mode
-    while (loopContinue && millis() <= timeout) {
+    while (loopContinue && !Yokis::elapsed(millis(), start, MAIN_LOOP_TIMEOUT_MILLIS)) {
+        if (available()) break; // handle data even if an IRQ edge was missed
+        if (txCycles < 65535) ++txCycles;
         write_register(NRF_CONFIG, 0b00001110);  // PTX
         ce(HIGH);
         yield();
@@ -414,7 +428,9 @@ bool E2bp::runMainLoop() {
 
     // We got here right after being interrupted
     if (available()) {
-        read(answerBuf, 2);
+        setPayloadSize(sizeof(answerBuf)); // RX is two bytes, TX is nine
+        read(answerBuf, sizeof(answerBuf));
+        receivedResponse = true;
 
 //        if (IS_DEBUG_ENABLED) {
             LOG.print("Received: ");
@@ -438,10 +454,13 @@ bool E2bp::runMainLoop() {
         // In such case home assistant will block the close command
         // Testing if a pause command was issued could be a possibility.
         if ( device->getMode() == SHUTTER ) {
-            if ( ((answerBuf[0] & 0x21) == 0x21 && answerBuf[1] == 0x02) || (answerBuf[0] == 0x01 && answerBuf[1] == 0x00) ) {
+            if (answerBuf[0] <= 1 && answerBuf[1] == 0) {
+                firstPayloadStatus = SHUTTER_STOPPED; // rest, endpoint not proven
+                LOG.println("Stopped (endpoint unknown)");
+            } else if ((answerBuf[0] & 0x21) == 0x21 && answerBuf[1] == 0x02) {
                 firstPayloadStatus = SHUTTER_OPENED;
                 LOG.println("Opened");
-            } else if ( ((answerBuf[0] & 0x11) == 0x10 && answerBuf[1] == 0x02) || (answerBuf[0] == 0x00 && answerBuf[1] == 0x00) ) {
+            } else if ((answerBuf[0] & 0x11) == 0x10 && answerBuf[1] == 0x02) {
                 firstPayloadStatus = SHUTTER_CLOSED;
                 LOG.println("Closed");
             } else if ( ((answerBuf[0] & 0x01) == 0x01 && answerBuf[1] == 0x03) || (answerBuf[0] == 0x01 && answerBuf[1] == 0x01) ) {
@@ -465,21 +484,27 @@ bool E2bp::runMainLoop() {
                 }
             } else {
                 if (answerBuf[1] == 1 || answerBuf[0] == 0x2f) {
-                    firstPayloadStatus = ON;
+                    secondPayloadStatus = ON;
                     LOG.println("On");
                 } else {
-                    firstPayloadStatus = OFF;
+                    secondPayloadStatus = OFF;
                     LOG.println("Off");
                 }
             }
         }
     }
 
-    return !loopContinue;  // false if timeout occurred
+    ce(LOW);
+    flush_tx(); // stop reuse before a different operation takes the radio
+    write_register(NRF_STATUS, 0b01110000);
+    return receivedResponse; // an interrupt alone is not proof of a payload
 }
 
 void E2bp::setupPayload(const uint8_t* payload) {
     // Prepare everything to send continuously the given payload
+    ce(LOW);
+    flush_rx(); // do not accept a stale response from the previous transaction
+    write_register(NRF_STATUS, 0b01110000);
     loopContinue = true;
     setPayloadSize(PAYLOAD_LENGTH);
     flush_tx();
@@ -487,7 +512,7 @@ void E2bp::setupPayload(const uint8_t* payload) {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void E2bp::stopMainLoop() {
     loopContinue = false;
@@ -495,32 +520,28 @@ void E2bp::stopMainLoop() {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void E2bp::interruptTxOk() {
-    if (IS_DEBUG_ENABLED) {
-        LOG.println("E2bp - TX OK");
-    }
+    // No Serial/Telnet work in interrupt context.
     write_register(NRF_CONFIG, 0b00001111);  // PRX
     ce(HIGH);
     write_register(NRF_STATUS, 0b01110000);  // Reset interrupts
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void E2bp::interruptRxReady() {
-    if (IS_DEBUG_ENABLED) {
-        LOG.println("E2bp - RX READY");
-    }
+
     // counter++;
     stopMainLoop();
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void E2bp::interruptTxFailed() {
     // Ignore
-    LOG.println("TX sent failed");
+    // No logging from the ISR. The caller reports transaction failure.
 }

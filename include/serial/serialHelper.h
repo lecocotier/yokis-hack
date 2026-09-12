@@ -18,16 +18,18 @@ class SerialHelper {
     uint8_t callbacksIndex;
     char currentCommand[MAX_COMMAND_FULL_LENGTH];
     int currentCommandIdx;
+    bool discardLine;
+    bool previousCR;
     unsigned int longestCommandLength;
 
    public:
     SerialHelper();
-    //~SerialHelper();
+    ~SerialHelper();
     void readFromSerial();
     void usage();
     bool registerCallback(SerialCallback* callback);
     bool executeCallback(const char*);
-    void extractCommand(char* buf);
+    void extractCommand(char* buf, size_t size = MAX_COMMAND_LENGTH + 1);
     // Executes a command. Returns true if command is found, false otherwise
     bool commandCallback(const char*);
 

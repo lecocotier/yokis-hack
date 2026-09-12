@@ -18,14 +18,16 @@ class MqttHass : public Mqtt {
     char* newMessageJson(const Device*, char*);
     char* newPublishTopic(const Device*, char*);
     bool discoveryDone = false;
+    void connectionEstablished() override { discoveryDone = false; }
 
    public:
     MqttHass(WiFiClient&);
     MqttHass(WiFiClient&, const char*, const uint16_t, const char*, const char*);
     bool isDiscoveryDone();
     void setDiscoveryDone(bool);
+    void removeDiscovery(const Device*);
     bool publishDevice(const Device*);
-    void subscribeDevice(const Device*);
+    bool subscribeDevice(const Device*);
     void notifyAvailability(const Device*, const char*);
     void notifyOnline(const Device*);
     void notifyOffline(const Device*);

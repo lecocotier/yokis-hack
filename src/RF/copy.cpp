@@ -1,4 +1,5 @@
 #include "RF/copy.h"
+#include "reliability.h"
 
 Copy::Copy(uint16_t cepin, uint16_t cspin, Device* device)
     : Pairing(cepin, cspin) {
@@ -20,12 +21,14 @@ void Copy::setupRFModule() {
 }
 
 bool Copy::send() {
-    if (device == NULL) return false;
+    if (!device || !device->isConfigured()) return false;
 
-    timeout = millis() + 200;
+    const uint32_t start = millis();
+    isFailed = false;
 
-    begin();
+    if (!begin()) return false;
     setupRFModule();
+    maskIRQ(true, true, true); // write() polls STATUS; ISR must not clear it
 
     // First payload
     //
@@ -35,16 +38,16 @@ bool Copy::send() {
     memcpy(recvBuffer, device->getVersion(), FIRST_PAYLOAD_SIZE);
     _debugPrintRecv(recvBuffer, FIRST_PAYLOAD_SIZE);
     setPayloadSize(FIRST_PAYLOAD_SIZE);
-    write(recvBuffer, FIRST_PAYLOAD_SIZE);
+    bool firstOk = write(recvBuffer, FIRST_PAYLOAD_SIZE);
 
     memcpy(recvBuffer, device->getHardwareAddress(), 2);
     recvBuffer[2] = device->getChannel();
     memcpy(recvBuffer + 3, device->getSerial(), 2);
     _debugPrintRecv(recvBuffer, SECOND_PAYLOAD_SIZE);
     setPayloadSize(SECOND_PAYLOAD_SIZE);
-    write(recvBuffer, SECOND_PAYLOAD_SIZE);
+    bool secondOk = firstOk && write(recvBuffer, SECOND_PAYLOAD_SIZE);
 
-    while (millis() < timeout) {
+    while (!Yokis::elapsed(millis(), start, 200)) {
         delay(1);  // let time to send packets
     }
 
@@ -56,23 +59,23 @@ bool Copy::send() {
         LOG.println(" - Copied successfully.");
     }*/
 
-    return !isFailed;
+    return firstOk && secondOk;
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Copy::interruptRxReady() {
     // Nothing will be received
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Copy::interruptTxOk() { isFailed = false; }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Copy::interruptTxFailed() {
     isFailed = true;

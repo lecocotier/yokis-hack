@@ -2,6 +2,7 @@
 #define __DEVICE_H__
 
 #include <Arduino.h>
+#include "reliability.h"
 
 #if defined(ESP8266)
 #include <LittleFS.h>
@@ -44,8 +45,10 @@ enum DimmerBrightness {
 
 class Device {
    private:
-    char* name;
-    uint8_t* hardwareAddress;
+    char name[Yokis::DeviceNameMax + 1];
+    uint8_t hardwareAddress[HARDWARE_ADDRESS_LENGTH];
+    bool addressConfigured;
+    bool channelConfigured;
     uint8_t channel;
     uint8_t serial[2];
     uint8_t version[3];
@@ -54,14 +57,12 @@ class Device {
     DeviceAvailability availability;
     DimmerBrightness brightness;  // only for dimmer device
     unsigned long lastUpdateMillis;
-    bool hasToBePolledForStatus;
+    volatile bool hasToBePolledForStatus;
     uint8_t failedPolls;
+    Yokis::CommandHistory commandHistory;
 
 #ifdef ESP8266
-    // Search for a given device in config
-    static int findInConfig(const char*);
-    // Delete a line in config
-    static void deleteLineInConfig(int line);
+    static bool writeConfig(const Device* replacement, const char* removedName, bool clear);
 #endif
 
    public:
@@ -90,6 +91,9 @@ class Device {
     // Last time device status was updated
     const unsigned long getLastUpdateMillis() const;
     bool needsPolling();
+    bool isConfigured() const;
+    bool isDuplicateCommand(Yokis::Command cmd, uint32_t now) const;
+    void acknowledgeCommand(Yokis::Command cmd, uint32_t now);
     static const char* getStatusAsString(DeviceStatus status);
     static const char* getModeAsString(DeviceMode mode);
     static const char* getAvailabilityAsString(DeviceAvailability);
@@ -124,19 +128,21 @@ class Device {
     void copy(const Device*);
     static Device* getFromList(Device**, size_t, const char*);
 #ifdef ESP8266
+    static bool parseConfigLine(const char*, Device&);
+    bool formatConfigLine(char*, size_t) const;
     // Save device obj to LittleFS
     bool saveToLittleFS();
     // Store a raw device config to LittleFS (use to migrate from SPIFFS to LittleFS)
     static bool storeRawConfig(const char*);
     // Load a bunch of devices from LittleFS to a previously allocated array of
     // pointers which size is passed as parameter
-    static void loadFromLittleFS(Device**, const unsigned int);
+    static int loadFromLittleFS(Device**, const unsigned int);
     // Display config file from LittleFS
     static void displayConfigFromLittleFS();
     // Clear config from LittleFS
-    static void clearConfigFromLittleFS();
+    static bool clearConfigFromLittleFS();
     // Delete a device from config
-    static void deleteFromConfig(const char*);
+    static bool deleteFromConfig(const char*);
 #endif
 };
 

@@ -1,6 +1,7 @@
 #include "commands/callbacks.h"
 
 #include "globals.h"
+#include "reliability.h"
 
 void registerAllCallbacks() {
     // Serial setup
@@ -11,8 +12,7 @@ void registerAllCallbacks() {
         pairingCallback));
     g_serial->registerCallback(
         new GenericCallback("toggle",
-                            "send a toggle message - basically act as a Yokis "
-                            "remote when a button is pressed then released",
+                            "Toggle a device; shutter toggle does not send a cancelling release",
                             toggleCallback));
     g_serial->registerCallback(
         new GenericCallback("scan",
@@ -77,8 +77,7 @@ void registerAllCallbacks() {
         restoreConfig));
     g_serial->registerCallback(
         new GenericCallback("wifiConfig",
-                            "Configure wifi with parameters: ssid psk (does "
-                            "not work for psk containing spaces)",
+                            "Configure WiFi: ssid [psk]; quote arguments containing spaces",
                             wifiConfig));
     g_serial->registerCallback(new GenericCallback(
         "wifiDiag", "Display wifi configuration debug info", wifiDiag));
@@ -109,6 +108,8 @@ bool pairingCallback(const char*) {
     IrqManager::irqType = PAIRING;
     bool res = g_pairingRF->hackPairing();
     if (res) {
+        Device fresh(CURRENT_DEVICE_DEFAULT_NAME);
+        g_currentDevice->copy(&fresh);
         g_pairingRF->getAddressFromRecvData(buf);
         g_currentDevice->setHardwareAddress(buf);
         g_currentDevice->setChannel(g_pairingRF->getChannelFromRecvData());
@@ -121,7 +122,7 @@ bool pairingCallback(const char*) {
 
         // Get device status and get device mode
         statusCallback(NULL);
-        g_currentDevice->setMode(g_bp->getDeviceModeFromRecvData());
+        LOG.println("Product type is not detectable from a status byte. Use save <name> SHUTTER (or ON_OFF/DIMMER/NO_RCPT).");
 
         g_currentDevice->toSerial();
     }
@@ -131,29 +132,12 @@ bool pairingCallback(const char*) {
 // Get a device from the list with the given params
 Device* getDeviceFromParams(const char* params) {
 #ifdef ESP8266
-    if (params == NULL || strcmp("", params) == 0) return g_currentDevice;
-
-    char* paramsBak;
-    char* pch;
-    Device* d;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");   // ignore the command name
-    pch = strtok(NULL, " ");  // get the name of the device
-
-    if (pch == NULL || strcmp("", pch) == 0) {
-        d = g_currentDevice;
-    } else {
-        d = Device::getFromList(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, pch);
-    }
-
-    delete[] paramsBak;
-    return d;
+    Yokis::Arguments args(params);
+    if (!args.valid) return NULL;
+    if (args.count < 2) return g_currentDevice;
+    return Device::getFromList(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, args.at(1));
 #else
-    return g_currentDevice;
+    (void)params; return g_currentDevice;
 #endif
 }
 
@@ -161,7 +145,7 @@ Device* getDeviceFromParams(const char* params) {
 bool changeDeviceState(const char* params, bool (E2bp::*func)(void)) {
     Device* d = getDeviceFromParams(params);
 
-    if (d == NULL || d->getHardwareAddress() == NULL) {
+    if (d == NULL || !d->isConfigured()) {
         LOG.println("No such device");
         return false;
     }
@@ -205,7 +189,7 @@ bool scannerCallback(const char* params) {
 
     Device* d = getDeviceFromParams(params);
 
-    if (d == NULL || d->getHardwareAddress() == NULL) {
+    if (d == NULL || !d->isConfigured()) {
         LOG.println("No such device");
         return false;
     }
@@ -220,7 +204,7 @@ bool scannerCallback(const char* params) {
 bool copyCallback(const char* params) {
     Device* d = getDeviceFromParams(params);
 
-    if (d == NULL || d->getHardwareAddress() == NULL) {
+    if (d == NULL || !d->isConfigured()) {
         LOG.println("No such device");
         return false;
     }
@@ -232,45 +216,24 @@ bool copyCallback(const char* params) {
 
 bool displayDevices(const char*) {
 #ifdef ESP8266
-    uint8_t c = 0;
-    while (g_devices[c] != NULL) {
-        LOG.println("=== Device ===");
-        g_devices[c]->toSerial();
-        LOG.println("==============");
-        c++;
-    }
+    for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i)
+        if (g_devices[i]) g_devices[i]->toSerial();
 #else
-    // for arduino devices, only display the g_currentDevice
     g_currentDevice->toSerial();
 #endif
     return true;
 }
 
-bool dimmerMemCallback(const char* params) {
-    int ret = changeDeviceState(params, &E2bp::dimmerMem);
-    return ret != -1;
-}
-bool dimmerMaxCallback(const char* params) {
-    int ret = changeDeviceState(params, &E2bp::dimmerMax);
-    return ret != -1;
-}
-bool dimmerMidCallback(const char* params) {
-    int ret = changeDeviceState(params, &E2bp::dimmerMid);
-    return ret != -1;
-}
-bool dimmerMinCallback(const char* params) {
-    int ret = changeDeviceState(params, &E2bp::dimmerMin);
-    return ret != -1;
-}
-bool dimmerNilCallback(const char* params) {
-    int ret = changeDeviceState(params, &E2bp::dimmerNiL);
-    return ret != -1;
-}
+bool dimmerMemCallback(const char* params) { return changeDeviceState(params, &E2bp::dimmerMem); }
+bool dimmerMaxCallback(const char* params) { return changeDeviceState(params, &E2bp::dimmerMax); }
+bool dimmerMidCallback(const char* params) { return changeDeviceState(params, &E2bp::dimmerMid); }
+bool dimmerMinCallback(const char* params) { return changeDeviceState(params, &E2bp::dimmerMin); }
+bool dimmerNilCallback(const char* params) { return changeDeviceState(params, &E2bp::dimmerNiL); }
 
 bool pressCallback(const char* params) {
     Device* d = getDeviceFromParams(params);
 
-    if (d == NULL || d->getHardwareAddress() == NULL) {
+    if (d == NULL || !d->isConfigured()) {
         LOG.println("No such device");
         return false;
     }
@@ -284,33 +247,20 @@ bool pressCallback(const char* params) {
 }
 
 bool pressForCallback(const char* params) {
-    Device* d = getDeviceFromParams(params);
-
-    if (d == NULL || d->getHardwareAddress() == NULL) {
-        LOG.println("No such device");
-        return false;
+    Yokis::Arguments args(params); uint32_t duration;
+    if (!args.valid || args.count != 3 || !Yokis::unsignedNumber(args.at(2), 600000, duration) || duration <= 700) {
+        LOG.println("Usage: pressFor <device> <duration_ms>, 701..600000"); return false;
     }
-
-    char* tok;
-    size_t paramsLen = strlen(params);
-    char* paramsBak = new char[paramsLen + 1];
-    strncpy(paramsBak, params, paramsLen);
-    paramsBak[paramsLen] = 0;
-    strtok(paramsBak, " ");   // command
-    strtok(NULL, " ");        // device name
-    tok = strtok(NULL, " ");  // duration
-    unsigned long durationMs = strtoul(tok, NULL, 10);
-    delete[] paramsBak;
-
-    IrqManager::irqType = E2BP;
-    g_bp->setDevice(d);
-    return g_bp->pressAndHoldFor(durationMs);
+    Device* d = getDeviceFromParams(params);
+    if (!d || !d->isConfigured()) return false;
+    IrqManager::irqType = E2BP; g_bp->setDevice(d);
+    return g_bp->pressAndHoldFor(duration);
 }
 
 bool releaseCallback(const char* params) {
     Device* d = getDeviceFromParams(params);
 
-    if (d == NULL || d->getHardwareAddress() == NULL) {
+    if (d == NULL || !d->isConfigured()) {
         LOG.println("No such device");
         return false;
     }
@@ -325,59 +275,31 @@ bool releaseCallback(const char* params) {
 
 bool statusCallback(const char* params) {
     Device* d = getDeviceFromParams(params);
-
-    if (d == NULL || d->getHardwareAddress() == NULL) {
-        LOG.println("No such device");
-        return false;
-    }
-
-    IrqManager::irqType = E2BP;
-    g_bp->setDevice(d);
+    if (!d || !d->isConfigured()) { LOG.println("No such configured device"); return false; }
+    IrqManager::irqType = E2BP; g_bp->setDevice(d);
     DeviceStatus st = g_bp->pollForStatus();
-
-    LOG.print("Device Status = ");
-    LOG.println(Device::getStatusAsString(st));
-
-    return true;
+    LOG.print("Device Status = "); LOG.println(Device::getStatusAsString(st));
+    if (!g_bp->hasResponse()) LOG.println("No radio response");
+    else if (st == UNDEFINED) LOG.println("Radio response received, state not decoded");
+    return g_bp->hasResponse();
 }
 
 #ifdef ESP8266
 bool storeConfigCallback(const char* params) {
-    char* paramsBak;
-    char* pch;
-    bool ret;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");   // ignore the command name
-    pch = strtok(NULL, " ");  // get the name of the device
-    if(pch == NULL || strlen(pch) == 0) {
-        LOG.println("Cannot save. Please specify a name for this device!");
-        return false;
+    Yokis::Arguments args(params);
+    if (!args.valid || args.count < 2 || args.count > 3 || !Yokis::validDeviceName(args.at(1))) {
+        LOG.println("Usage: save <name> [ON_OFF|DIMMER|SHUTTER|NO_RCPT], name max 48 characters"); return false;
     }
-    g_currentDevice->setName(pch);
-
-    // This should be auto detected from pairing
-    pch = strtok(NULL, " ");  // Get the device mode
-    if (pch != NULL) {
-        g_currentDevice->setMode(pch);
-    }
-
-    ret = g_currentDevice->saveToLittleFS();
-    if (ret) LOG.println("Saved.");
-
-    // reset default name
-    g_currentDevice->setName(CURRENT_DEVICE_DEFAULT_NAME);
-
-    delete[] paramsBak;
-    return ret;
+    if (args.count == 3 && strcmp(args.at(2), "ON_OFF") && strcmp(args.at(2), "DIMMER") &&
+        strcmp(args.at(2), "SHUTTER") && strcmp(args.at(2), "NO_RCPT")) return false;
+    Device saved(g_currentDevice); saved.setName(args.at(1));
+    if (args.count == 3) saved.setMode(args.at(2));
+    if (!saved.saveToLittleFS()) return false;
+    LOG.println("Saved."); return reloadConfig(NULL);
 }
 
 bool clearConfig(const char*) {
-    Device::clearConfigFromLittleFS();
-    return true;
+    return Device::clearConfigFromLittleFS() && reloadConfig(NULL);
 }
 
 bool displayConfig(const char*) {
@@ -386,59 +308,47 @@ bool displayConfig(const char*) {
 }
 
 bool restoreConfig(const char* params) {
-    char* paramsBak;
-    char* pch;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");   // ignore the command
-    pch = strtok(NULL, " ");  // Get the line to restore
-
-    bool ret = Device::storeRawConfig(pch);
-
-    delete[] paramsBak;
-    return ret;
+    Yokis::Arguments args(params);
+    return args.valid && args.count == 2 && Device::storeRawConfig(args.at(1)) && reloadConfig(NULL);
 }
 
 bool reloadConfig(const char*) {
-    for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
-        delete g_devices[i];  // delete previously allocated device if needed
-        if (g_deviceStatusPollers[i] != NULL) g_deviceStatusPollers[i]->detach();
-        delete g_deviceStatusPollers[i];
-        g_devices[i] = NULL;
-        g_deviceStatusPollers[i] = NULL;
+    Device* loaded[MQTT_MAX_NUM_OF_YOKIS_DEVICES] = {};
+    int n = Device::loadFromLittleFS(loaded, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
+    if (n < 0) return false;
+    // Detach all callbacks BEFORE freeing their Device arguments.
+    for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i)
+        if (g_deviceStatusPollers[i]) g_deviceStatusPollers[i]->detach();
+    if (g_bp) g_bp->setDevice(NULL);
+    if (g_scanner) { g_scanner->ce(LOW); g_scanner->setDevice(NULL); }
+    if (g_copy) g_copy->setDevice(NULL);
+    IrqManager::irqType = E2BP;
+#ifdef MQTT_ENABLED
+    if (g_mqtt) {
+        for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
+            if (g_devices[i]) {
+                Device* next = Device::getFromList(loaded, n, g_devices[i]->getName());
+                if (!next || next->getMode() != g_devices[i]->getMode()) g_mqtt->removeDiscovery(g_devices[i]);
+            }
+        }
+        g_mqtt->clearSubscriptions(); g_mqtt->setDiscoveryDone(false);
     }
-    Device::loadFromLittleFS(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
-
-    // Reattach tickers to devices
-    for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
-        if (g_devices[i] != NULL) {
+#endif
+    for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
+        delete g_deviceStatusPollers[i]; g_deviceStatusPollers[i] = NULL;
+        delete g_devices[i]; g_devices[i] = loaded[i];
+        if (g_devices[i] && g_devices[i]->getMode() != NO_RCPT) {
             g_deviceStatusPollers[i] = new Ticker();
-            g_deviceStatusPollers[i]->attach_ms(random(4000, 10000), pollDevice,
-                                              g_devices[i]);
+            if (g_deviceStatusPollers[i])
+                g_deviceStatusPollers[i]->attach_ms(random(4000, 10000), pollDevice, g_devices[i]);
         }
     }
-    LOG.println("Reloaded.");
-    return true;
+    LOG.println("Reloaded."); return true;
 }
 
 bool deleteFromConfig(const char* params) {
-    char* paramsBak;
-    char* pch;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");   // ignore the command
-    pch = strtok(NULL, " ");  // Get the name to delete
-
-    Device::deleteFromConfig(pch);
-
-    delete[] paramsBak;
-    return true;
+    Yokis::Arguments args(params);
+    return args.valid && args.count == 2 && Device::deleteFromConfig(args.at(1)) && reloadConfig(NULL);
 }
 
 // Interrupt function
@@ -452,22 +362,12 @@ bool resetWifiConfigCallback(const char* params) {
 }
 
 bool wifiConfig(const char* params) {
-    char* paramsBak;
-    char* ssid;
-    char* psk;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");    // ignore the command name
-    ssid = strtok(NULL, " ");  // Get the ssid
-    psk = strtok(NULL, " ");   // Get the psk if set
-
-    setupWifi(ssid, psk);
-
-    delete[] paramsBak;
-    return true;
+    Yokis::Arguments args(params);
+    if (!args.valid || args.count < 2 || args.count > 3 || !*args.at(1) ||
+        strlen(args.at(1)) > 32 || strlen(args.at(2)) > 64) {
+        LOG.println("Usage: wifiConfig <ssid> [password], quoted arguments supported"); return false;
+    }
+    setupWifi(args.at(1), args.at(2)); return true;
 }
 
 bool wifiDiag(const char* params) {
@@ -489,43 +389,14 @@ bool restart(const char* params) {
 
 #if defined(MQTT_ENABLED)
 bool mqttConfig(const char* params) {
-    char* paramsBak;
-    char *host, *sport, *username, *password;
-    MqttConfig config;
-
-    int len = strlen(params);
-    paramsBak = new char[len + 1];
-    strncpy(paramsBak, params, len);
-    paramsBak[len] = 0;
-    strtok(paramsBak, " ");    // Ignore the command name
-    host = strtok(NULL, " ");  // Get the host
-    if (host == NULL) {
-        LOG.println("MQTT host cannot be null. Aborting.");
-        return false;
+    Yokis::Arguments args(params); uint32_t port;
+    if (!args.valid || args.count < 3 || args.count > 5 || !*args.at(1) ||
+        !Yokis::unsignedNumber(args.at(2), 65535, port) || !port) {
+        LOG.println("Usage: mqttConfig <host> <port 1..65535> [user] [password]"); return false;
     }
-    config.setHost(host);
-
-    sport = strtok(NULL, " ");  // Get the port
-    if (sport == NULL || strlen(sport) == 0 || strlen(sport) > 5) {
-        LOG.println("MQTT port is null or too high. Aborting.");
-        return false;
-    }
-    config.setPort((uint16_t)atol(sport));
-
-    username = strtok(NULL, " ");  // Get the username
-    config.setUsername(username);
-
-    password = strtok(NULL, " ");  // Get the password
-    config.setPassword(password);
-
-    LOG.println("MQTT configuration:");
-    config.printDebug(LOG);
-
-    g_mqtt->setDiscoveryDone(false);
-    g_mqtt->setConnectionInfo(config);
-
-    delete[] paramsBak;
-    return true;
+    bool ok = g_mqtt->setConnectionInfo(args.at(1), uint16_t(port), args.at(3), args.at(4));
+    if (ok) g_mqtt->setDiscoveryDone(false);
+    return ok;
 }
 
 bool mqttDiag(const char* params) {
@@ -535,11 +406,11 @@ bool mqttDiag(const char* params) {
 }
 
 bool mqttConfigDelete(const char*) {
+    if (!MqttConfig::deleteConfigFromLittleFS()) return false;
     MqttConfig emptyConfig;
-    MqttConfig::deleteConfigFromLittleFS();
-    g_mqtt->setConnectionInfo(emptyConfig);
-    LOG.println("MQTT config deleted!");
-    return true;
+    if (!g_mqtt->setConnectionInfo(emptyConfig, false)) return false;
+    g_mqtt->setDiscoveryDone(false);
+    LOG.println("MQTT config deleted!"); return true;
 }
 
 #endif // MQTT_ENABLED

@@ -9,7 +9,7 @@ class YokisLittleFS {
      static bool initialized;
 
     public:
-     static void init();
+     static bool init();
 };
 
 #endif  // __YOKIS_LITTLE_FS_H__

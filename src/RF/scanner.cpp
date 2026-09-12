@@ -8,7 +8,7 @@ Scanner::Scanner(uint16_t cepin, uint16_t cspin) : E2bp(cepin, cspin) {}
 void Scanner::setupRFModule() {
     if (getDevice() == NULL || getDevice()->getHardwareAddress() == NULL) return;
 
-    begin();
+    if (!begin()) return;
     disableCRC();
     setPayloadSize(BUFFER_MAX);
     setAutoAck(false);
@@ -22,9 +22,13 @@ void Scanner::setupRFModule() {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
-void Scanner::interruptRxReady() {
+void Scanner::interruptRxReady() { rxPending = true; }
+
+void Scanner::service() {
+    if (!getDevice()) return;
+    rxPending = false;
     if (available()) {
         read(buf, BUFFER_MAX);
         LOG.print("Received : ");
@@ -37,11 +41,11 @@ void Scanner::interruptRxReady() {
 }
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Scanner::interruptTxOk() {}
 
 #if defined(ESP8266)
-ICACHE_RAM_ATTR
+IRAM_ATTR
 #endif
 void Scanner::interruptTxFailed() {}

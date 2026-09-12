@@ -1,145 +1,76 @@
 #ifdef ESP8266
 #include "net/mqttConfig.h"
 #include "globals.h"
+#include "reliability.h"
 
-MqttConfig::MqttConfig() {
-    strcpy(host, "");
-    strcpy(username, "");
-    strcpy(password, "");
+MqttConfig::MqttConfig() : port(MQTT_DEFAULT_PORT) {
+    memset(host, 0, sizeof(host)); memset(username, 0, sizeof(username));
+    memset(password, 0, sizeof(password));
 }
-
-MqttConfig::MqttConfig(const MqttConfig& config) {
-    setHost(config.host);
-    setPort(config.port);
-    setUsername(config.username);
-    setPassword(config.password);
+MqttConfig::MqttConfig(const MqttConfig& c) : MqttConfig() { *this = c; }
+MqttConfig::MqttConfig(const char* h, uint16_t p, const char* u, const char* pw) : MqttConfig() {
+    setHost(h); setPort(p); setUsername(u); setPassword(pw);
 }
-
-MqttConfig::MqttConfig(const char* host, uint16_t port, const char* username, const char* password) {
-    setHost(host);
-    setPort(port);
-    setUsername(username);
-    setPassword(password);
+MqttConfig::~MqttConfig() {}
+bool MqttConfig::setHost(const char* h) {
+    return Yokis::configField(h ? h : "") && Yokis::copyText(host, sizeof(host), h);
 }
-
-MqttConfig::~MqttConfig() {
+bool MqttConfig::setPort(uint16_t p) { if (!p) return false; port = p; return true; }
+bool MqttConfig::setUsername(const char* u) {
+    return Yokis::configField(u ? u : "") && Yokis::copyText(username, sizeof(username), u);
 }
-
-void MqttConfig::setHost(const char* h) {
-    strncpy(host, h, MQTT_HOST_MAX_LENGTH);
+bool MqttConfig::setPassword(const char* p) {
+    return Yokis::configField(p ? p : "") && Yokis::copyText(password, sizeof(password), p);
 }
-
-void MqttConfig::setPort(uint16_t p) {
-    this->port = p;
-}
-
-void MqttConfig::setUsername(const char* u) {
-    strncpy(username, u, MQTT_USERNAME_MAX_LENGTH);
-}
-
-void MqttConfig::setPassword(const char* p) {
-    strncpy(password, p, MQTT_PASSWORD_MAX_LENGTH);
-}
-
 char* MqttConfig::getHost() { return host; }
-
 uint16_t MqttConfig::getPort() { return port; }
-
 char* MqttConfig::getUsername() { return username; }
-
 char* MqttConfig::getPassword() { return password; }
-
-bool MqttConfig::isEmpty() {
-    return host == nullptr || strlen(host) == 0;
-}
-
+bool MqttConfig::isEmpty() { return !host[0]; }
 void MqttConfig::printDebug(Print& p) {
-    char buf[MQTT_HOST_MAX_LENGTH+11];
-
-    sprintf(buf, "Host: %s", getHost());
-    p.println(buf);
-    sprintf(buf, "Port: %d", getPort());
-    p.println(buf);
-    sprintf(buf, "Username: %s", getUsername());
-    p.println(buf);
-    sprintf(buf, "Password: %s", getPassword());
-    p.println(buf);
+    p.print("Host: "); p.println(host); p.print("Port: "); p.println(port);
+    p.print("Username: "); p.println(username); p.print("Password: "); p.println(password);
 }
-
 bool MqttConfig::saveToLittleFS() {
-    bool ret = true;
-
-    YokisLittleFS::init();
-
-    File f = LittleFS.open(MQTT_CONFIG_FILE_NAME, "w");  // create or truncate file
-    if (!f) {
-        LOG.print(MQTT_CONFIG_FILE_NAME);
-        LOG.println(" - file open failed for writing");
-        return false;
-    }
-
-    String _host = String(this->host);
-    String _username = String(this->username);
-    String _password = String(this->password);
-
-    char port_str[6]; // max length = 5 + \0 char
-    sprintf(port_str, "%d", this->port);
-    char* buf = (char*)malloc(
-        sizeof(char) * (_host.length() + strlen(port_str) +
-                        _username.length() + _password.length() + 5));
-    sprintf(buf, "%s|%s|%s|%s|", _host.c_str(), port_str,
-            _username.c_str(), _password.c_str());
-
-    int bytesWritten = f.println(buf);
-    if (bytesWritten <= 0) {
-        LOG.print(MQTT_CONFIG_FILE_NAME);
-        LOG.println(" - cannot write to file");
-        ret = false;
-    }
-
-    free(buf);
-    f.close();
-    return ret;
+    if (!YokisLittleFS::init()) return false;
+    char buf[sizeof(host) + sizeof(username) + sizeof(password) + 12];
+    int n = snprintf(buf, sizeof(buf), "%s|%u|%s|%s|", host, unsigned(port), username, password);
+    if (n < 0 || size_t(n) >= sizeof(buf)) return false;
+    const char* temp = "/mqtt.conf.tmp";
+    File f = LittleFS.open(temp, "w"); if (!f) return false;
+    bool ok = f.println(buf) == size_t(n) + 2;
+    f.flush(); ok = ok && !f.getWriteError(); f.close();
+    if (ok) ok = LittleFS.rename(temp, MQTT_CONFIG_FILE_NAME);
+    if (!ok) LittleFS.remove(temp);
+    return ok;
 }
-
-// static
 MqttConfig MqttConfig::loadFromLittleFS() {
     MqttConfig config;
-
-    YokisLittleFS::init();
+    if (!YokisLittleFS::init()) return config;
     File f = LittleFS.open(MQTT_CONFIG_FILE_NAME, "r");
-    if (!f) {
-        LOG.print(MQTT_CONFIG_FILE_NAME);
-        LOG.println(" - File open failed for reading");
-        return config;
-    }
-
-    if (f.available()) {
-        config.setHost(f.readStringUntil('|').c_str());
-        config.setPort(atoi(f.readStringUntil('|').c_str()));
-        config.setUsername(f.readStringUntil('|').c_str());
-        config.setPassword(f.readStringUntil('|').c_str());
-    }
-
-    /*
-    LOG.println("Config file debug");
-    LOG.println("##########");
-    f.seek(0);
-    while(f.available()) {
+    if (!f) return config;
+    char buf[MQTT_HOST_MAX_LENGTH + MQTT_USERNAME_MAX_LENGTH + MQTT_PASSWORD_MAX_LENGTH + 12];
+    size_t n = 0; bool ok = true;
+    while (f.available()) {
         int c = f.read();
-        LOG.print(c, HEX);
+        if (n + 1 < sizeof(buf)) buf[n++] = char(c); else ok = false;
     }
-    LOG.println();
-    LOG.println("##########");
-    */
-
-    f.close();
+    f.close(); buf[n] = 0;
+    if (!ok) return config;
+    char* fields[4]; char* cur = buf;
+    for (unsigned i = 0; i < 4; ++i) {
+        fields[i] = cur; char* sep = strchr(cur, '|');
+        if (!sep) return MqttConfig();
+        *sep = 0; cur = sep + 1;
+    }
+    while (*cur == '\r' || *cur == '\n') ++cur;
+    uint32_t port;
+    if (*cur || !Yokis::unsignedNumber(fields[1], 65535, port) || !port ||
+        !config.setHost(fields[0]) || !config.setPort(uint16_t(port)) ||
+        !config.setUsername(fields[2]) || !config.setPassword(fields[3])) return MqttConfig();
     return config;
 }
-
-// static
 bool MqttConfig::deleteConfigFromLittleFS() {
-    YokisLittleFS::init();
-    return LittleFS.remove(MQTT_CONFIG_FILE_NAME);
+    return YokisLittleFS::init() && (!LittleFS.exists(MQTT_CONFIG_FILE_NAME) || LittleFS.remove(MQTT_CONFIG_FILE_NAME));
 }
-#endif // ESP8266
+#endif

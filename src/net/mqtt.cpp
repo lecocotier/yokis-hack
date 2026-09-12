@@ -2,11 +2,12 @@
 #include "net/mqtt.h"
 #include <Arduino.h>
 #include "globals.h"
+#include "reliability.h"
 
 Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig() {
     // Init subscriptions to NULL
     subscribedTopicIdx = 0;
-    for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
+    for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; i++) {
         subscribedTopics[i] = NULL;
     }
 }
@@ -17,67 +18,60 @@ Mqtt::Mqtt(WiFiClient& wifiClient, MqttConfig& mqttConfig)
 
     // Init subscriptions to NULL
     subscribedTopicIdx = 0;
-    for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
+    for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; i++) {
         subscribedTopics[i] = NULL;
     }
 }
 
 // Set mqtt connection info, and optionally save config to LittleFS (default to
 // true)
-void Mqtt::setConnectionInfo(MqttConfig& config, bool saveConfig) {
-    setConnectionInfo(config.getHost(), config.getPort(), config.getUsername(), config.getPassword(), saveConfig);
+bool Mqtt::setConnectionInfo(MqttConfig& c, bool saveConfig) {
+    return setConnectionInfo(c.getHost(), c.getPort(), c.getUsername(), c.getPassword(), saveConfig);
 }
-
-// Set mqtt connection info, and optionally save config to LittleFS (default to
-// true)
-void Mqtt::setConnectionInfo(const char* host, uint16_t port, const char* username, const char* password, bool saveConfig) {
-    this->setHost(host);
-    this->setPort(port);
-    this->setUsername(username);
-    this->setPassword(password);
-    if(saveConfig) {
-        this->saveToLittleFS();
-    }
-    //this->MqttConfig::printDebug(LOG);
-
-    if (this->connected()) {
-        this->disconnect();
-    }
-
-    this->setServer(getHost(), getPort());
-    this->reconnect(true);
+bool Mqtt::setConnectionInfo(const char* host, uint16_t port, const char* username,
+                             const char* password, bool saveConfig) {
+    MqttConfig candidate;
+    if (!candidate.setHost(host) || !candidate.setPort(port) ||
+        !candidate.setUsername(username) || !candidate.setPassword(password)) return false;
+    if (saveConfig && !candidate.saveToLittleFS()) return false;
+    if (connected()) disconnect();
+    MqttConfig::operator=(candidate);
+    setServer(getHost(), getPort());
+    connectionAttempted = false;
+    // Connection is attempted from loop(), not from an AsyncTCP callback.
+    return true;
 }
-
 boolean Mqtt::subscribe(const char* topic) {
-    LOG.print("Subscribing to topic: ");
-    LOG.println(topic);
-    if (subscribedTopicIdx >= MQTT_MAX_NUM_OF_YOKIS_DEVICES) return false;
-
-    subscribedTopics[subscribedTopicIdx] = (char*)malloc(strlen(topic)+1);
-    strlcpy(subscribedTopics[subscribedTopicIdx], topic, strlen(topic)+1);
-    subscribedTopicIdx++;
-
-    return PubSubClient::subscribe(topic);
+    if (!topic || !*topic || !connected()) return false;
+    for (uint16_t i = 0; i < subscribedTopicIdx; ++i)
+        if (strcmp(subscribedTopics[i], topic) == 0) return PubSubClient::subscribe(topic);
+    if (subscribedTopicIdx >= MQTT_MAX_SUBSCRIPTIONS) return false;
+    char* saved = (char*)malloc(strlen(topic) + 1);
+    if (!saved) return false;
+    strcpy(saved, topic);
+    if (!PubSubClient::subscribe(topic)) { free(saved); return false; }
+    subscribedTopics[subscribedTopicIdx++] = saved;
+    return true;
 }
 
 void Mqtt::resubscribe() {
     LOG.print("Resubscribing, #topics=");
     LOG.println(subscribedTopicIdx);
-    for(uint8_t i=0; i<subscribedTopicIdx; i++) {
+    for(uint16_t i=0; i<subscribedTopicIdx; i++) {
         PubSubClient::subscribe(subscribedTopics[i]);
     }
 }
 
 void Mqtt::clearSubscriptions() {
-    for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; i++) {
-        if (subscribedTopics[i] != NULL) {
-            LOG.println(subscribedTopics[i]);
-            free(subscribedTopics[i]);
+    for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; ++i) {
+        if (subscribedTopics[i]) {
+            if (connected()) PubSubClient::unsubscribe(subscribedTopics[i]);
+            free(subscribedTopics[i]); subscribedTopics[i] = NULL;
         }
     }
-
     subscribedTopicIdx = 0;
 }
+Mqtt::~Mqtt() { clearSubscriptions(); }
 
 // force=false by default
 bool Mqtt::reconnect(bool force) {
@@ -86,29 +80,21 @@ bool Mqtt::reconnect(bool force) {
         return false;
     }
 
-    // Retry once in a while to avoid blocking serial console
-    // Handling too big unsigned long
-    if(!force) {
-        if(lastConnectionRetry > ULONG_MAX - MQTT_CONNECT_RETRY_EVERY_MS) {
-            lastConnectionRetry = 0;
-        }
-        if (lastConnectionRetry!=0 && lastConnectionRetry + MQTT_CONNECT_RETRY_EVERY_MS >= millis()) { // millis resets every 72 minutes
-            // Too soon
-            return false;
-        }
-    }
-
-    lastConnectionRetry = millis();
+    uint32_t now = millis();
+    if (!force && connectionAttempted && !Yokis::elapsed(now, lastConnectionRetry, MQTT_CONNECT_RETRY_EVERY_MS))
+        return false;
+    lastConnectionRetry = now; connectionAttempted = true;
 
     char buf[128];
     String clientId = "YokisHack-";
     clientId += String(random(0xffff), HEX);
 
-    sprintf(buf, "Connecting to MQTT %s:%hu with client ID=%s... ", getHost(), getPort(), clientId.c_str());
+    snprintf(buf, sizeof(buf), "Connecting to MQTT %s:%hu with client ID=%s... ", getHost(), getPort(), clientId.c_str());
     LOG.print(buf);
 
     if (this->connect(clientId.c_str(), getUsername(), getPassword())) {
         LOG.println("connected");
+        connectionEstablished();
         this->resubscribe();  // resubscribe to all configured topics
     } else {
         LOG.print("failed with state ");

@@ -128,6 +128,7 @@ class WebServer : public AsyncWebServer {
 
     WebServer(uint16_t port);
     ~WebServer();
+    void processPending();
     static String processor(const String& var);
 };
 

@@ -7,47 +7,31 @@
 #include <FS.h>
 #endif
 
-Device::Device(const char* dname) {
-    this->name = NULL;
-    this->setName(dname);
-    this->hardwareAddress =
-        (uint8_t*)malloc(HARDWARE_ADDRESS_LENGTH * sizeof(uint8_t));
-    memset(this->serial, 0, 2 * sizeof(uint8_t));
-    memset(this->version, 0, 3 * sizeof(uint8_t));
-    this->setMode(ON_OFF);  // most used devices AFAIK
-    this->setStatus(UNDEFINED);
-    this->setAvailability(ONLINE);
-    this->setBrightness(BRIGHTNESS_OFF);
-    this->lastUpdateMillis = 0;
-    this->hasToBePolledForStatus = false;
+Device::Device(const char* dname)
+    : channel(0), mode(ON_OFF), status(UNDEFINED), availability(ONLINE),
+      brightness(BRIGHTNESS_OFF), lastUpdateMillis(0),
+      hasToBePolledForStatus(false), failedPolls(0) {
+    name[0] = '\0';
+    memset(hardwareAddress, 0, sizeof(hardwareAddress));
+    memset(serial, 0, sizeof(serial));
+    memset(version, 0, sizeof(version));
+    addressConfigured = channelConfigured = false;
+    setName(dname);
 }
-
-Device::Device(const Device* device) : Device(device->name) {
-    this->copy(device);
+Device::Device(const Device* d) : Device(d ? d->getName() : "") { copy(d); }
+Device::Device(const char* n, const uint8_t* a, uint8_t c) : Device(n) {
+    setHardwareAddress(a); setChannel(c);
 }
-
-Device::Device(const char* dname, const uint8_t* hwAddr, uint8_t channel)
-    : Device(dname) {
-    this->setHardwareAddress(hwAddr);
-    this->setChannel(channel);
+Device::Device(const char* n, const uint8_t* a, uint8_t c,
+               const uint8_t* serial, const uint8_t* version) : Device(n, a, c) {
+    setSerial(serial); setVersion(version);
 }
-
-Device::Device(const char* dname, const uint8_t* hwAddr, uint8_t channel,
-               const uint8_t* serial, const uint8_t* version)
-    : Device(dname, hwAddr, channel) {
-    this->setSerial(serial);
-    this->setVersion(version);
-}
-
-Device::~Device() {
-    free(this->name);
-    free(this->hardwareAddress);
-}
+Device::~Device() {}
 
 const char* Device::getName() const { return this->name; }
 
 const uint8_t* Device::getHardwareAddress() const {
-    return this->hardwareAddress;
+    return addressConfigured ? this->hardwareAddress : NULL;
 }
 
 uint8_t Device::getChannel() const { return this->channel; }
@@ -124,49 +108,34 @@ const char* Device::getAvailabilityAsString(DeviceAvailability availability) {
     return NULL;
 }
 
-void Device::setName(const char* dname) {
-    if (dname != NULL) {
-        this->name = (char*)realloc(this->name, strlen(dname) + 1);
-        strcpy(this->name, dname);
-    }
+void Device::setName(const char* n) {
+    if (Yokis::validDeviceName(n)) Yokis::copyText(name, sizeof(name), n);
+}
+void Device::setHardwareAddress(const uint8_t* a) {
+    if (a) { memcpy(hardwareAddress, a, sizeof(hardwareAddress)); addressConfigured = true; }
+}
+void Device::setHardwareAddress(const char* text) {
+    uint32_t value;
+    if (!text || strlen(text) != 4 || !Yokis::unsignedNumber(text, 65535, value, 16)) return;
+    uint8_t a[] = {uint8_t(value >> 8), uint8_t(value), uint8_t(value >> 8), uint8_t(value), uint8_t(value)};
+    setHardwareAddress(a);
+}
+void Device::setChannel(uint8_t c) {
+    if (c <= 125) { channel = c; channelConfigured = true; }
+}
+void Device::setVersion(const uint8_t* v) { if (v) memcpy(version, v, sizeof(version)); }
+void Device::setSerial(const uint8_t* v) { if (v) memcpy(serial, v, sizeof(serial)); }
+bool Device::isConfigured() const {
+    return addressConfigured && channelConfigured && Yokis::validDeviceName(name);
+}
+bool Device::isDuplicateCommand(Yokis::Command cmd, uint32_t now) const {
+    return commandHistory.duplicate(cmd, now);
+}
+void Device::acknowledgeCommand(Yokis::Command cmd, uint32_t now) {
+    commandHistory.acknowledged(cmd, now);
 }
 
-void Device::setHardwareAddress(const uint8_t* hwAddr) {
-    if (hwAddr != NULL) {
-        memcpy(this->hardwareAddress, hwAddr,
-               HARDWARE_ADDRESS_LENGTH * sizeof(uint8_t));
-    }
-}
-
-void Device::setHardwareAddress(const char* hw) {
-    uint8_t b1, b2;
-    char buf[3];
-
-    buf[2] = 0;  // null terminate in advance
-
-    strncpy(buf, hw, 2);
-    b1 = (uint8_t)strtoul(buf, NULL, 16);
-    strncpy(buf, hw + 2, 2);
-    b2 = (uint8_t)strtoul(buf, NULL, 16);
-
-    this->hardwareAddress[0] = b1;
-    this->hardwareAddress[1] = b2;
-    this->hardwareAddress[2] = b1;
-    this->hardwareAddress[3] = b2;
-    this->hardwareAddress[4] = b2;
-}
-
-void Device::setChannel(uint8_t channel) { this->channel = channel; }
-
-void Device::setVersion(const uint8_t* version) {
-    memcpy(this->version, version, 3 * sizeof(uint8_t));
-}
-
-void Device::setSerial(const uint8_t* serial) {
-    memcpy(this->serial, serial, 2 * sizeof(uint8_t));
-}
-
-void Device::setMode(DeviceMode mode) { this->mode = mode; }
+void Device::setMode(DeviceMode mode) { if (mode >= ON_OFF && mode <= SHUTTER) this->mode = mode; }
 
 void Device::setMode(const char* mode) {
     if (mode == NULL || strlen(mode) == 0) {
@@ -214,7 +183,8 @@ void Device::pollingSuccess() {
 
 uint8_t Device::pollingFailed() {
     this->hasToBePolledForStatus = false;
-    return ++failedPolls;
+    if (failedPolls < 255) ++failedPolls;
+    return failedPolls;
 }
 
 uint8_t Device::getFailedPollings() {
@@ -235,6 +205,9 @@ void Device::toggleStatus() {
         case ON:
             setStatus(OFF);
             setBrightness(BRIGHTNESS_OFF);
+            break;
+        default: // A logical toggle cannot infer a physical shutter position.
+            setStatus(UNDEFINED);
             break;
     }
 }
@@ -266,18 +239,7 @@ void Device::toSerial() {
 }
 
 // Copy all fields from given device to this device
-void Device::copy(const Device* d) {
-    this->setName(d->getName());
-    this->setHardwareAddress(d->getHardwareAddress());
-    this->setChannel(d->getChannel());
-    this->setVersion(d->getVersion());
-    this->setSerial(d->getSerial());
-    this->setMode(d->getMode());
-    this->setStatus(d->getStatus());
-    this->setBrightness(d->getBrightness());
-    this->setAvailability(d->getAvailability());
-    this->lastUpdateMillis = d->lastUpdateMillis;
-}
+void Device::copy(const Device* d) { if (d && d != this) *this = *d; }
 
 // Static - Get device from a given list of devices
 // devices is the list of devices
@@ -287,6 +249,7 @@ void Device::copy(const Device* d) {
 Device* Device::getFromList(Device** devices, size_t size,
                             const char* deviceName) {
     Device* d = NULL;
+    if (!devices || !deviceName) return NULL;
 
     for (unsigned int i = 0; i < size; i++) {
         if (devices[i] != NULL &&
@@ -300,240 +263,130 @@ Device* Device::getFromList(Device** devices, size_t size,
 }
 
 #ifdef ESP8266
+namespace {
+// Consume the ENTIRE physical line even when too long. Never parse its tail as
+// another device. CRLF and a last line without LF remain backward compatible.
+bool readConfigLine(File& f, char* buf, size_t cap) {
+    size_t n = 0; bool overflow = false;
+    while (f.available()) {
+        int c = f.read();
+        if (c == '\n') break;
+        if (n + 1 < cap) buf[n++] = char(c); else overflow = true;
+    }
+    if (n && buf[n - 1] == '\r') --n;
+    buf[n] = 0;
+    return !overflow;
+}
+}
 
-// Static - Store a raw configuration line into LittleFS
+bool Device::parseConfigLine(const char* line, Device& result) {
+    if (!line || strlen(line) >= Yokis::ConfigLineSize) return false;
+    char buf[Yokis::ConfigLineSize]; strcpy(buf, line);
+    size_t len = strlen(buf);
+    while (len && (buf[len-1] == '\r' || buf[len-1] == '\n')) buf[--len] = 0;
+    char* fields[8]; fields[0] = buf;
+    for (unsigned i = 1; i < 8; ++i) {
+        char* sep = strchr(fields[i - 1], '|');
+        if (!sep) return false;
+        *sep = 0; fields[i] = sep + 1;
+    }
+    if (strchr(fields[7], '|') || !Yokis::validDeviceName(fields[0])) return false;
+    const size_t lengths[] = {0,4,2,2,2,6,4,4};
+    uint32_t values[8] = {};
+    for (unsigned i = 1; i < 8; ++i) {
+        if (strlen(fields[i]) != lengths[i] ||
+            !Yokis::unsignedNumber(fields[i], i == 5 ? 0xffffffUL : 65535,
+                                   values[i], i == 7 ? 10 : 16)) return false;
+    }
+    if (values[2] > 125 || values[7] > SHUTTER) return false;
+    Device d(fields[0]);
+    d.setHardwareAddress(fields[1]); d.setChannel(uint8_t(values[2]));
+    uint8_t ver[] = {uint8_t(values[5] >> 16), uint8_t(values[5] >> 8), uint8_t(values[5])};
+    uint8_t ser[] = {uint8_t(values[6] >> 8), uint8_t(values[6])};
+    d.setVersion(ver); d.setSerial(ser); d.setMode(DeviceMode(values[7]));
+    result.copy(&d);
+    return true;
+}
+
+bool Device::formatConfigLine(char* buf, size_t size) const {
+    if (!isConfigured() || !buf || !size) return false;
+    int n = snprintf(buf, size, "%s|%02x%02x|%02x|00|00|%02x%02x%02x|%02x%02x|%04u",
+        name, hardwareAddress[0], hardwareAddress[1], channel,
+        version[0], version[1], version[2], serial[0], serial[1], unsigned(mode));
+    return n >= 0 && size_t(n) < size;
+}
+
+bool Device::writeConfig(const Device* replacement, const char* removedName, bool clear) {
+    if (!YokisLittleFS::init()) return false;
+    const char* temp = "/yokis.conf.tmp";
+    File input;
+    if (!clear && LittleFS.exists(LITTLEFS_CONFIG_FILENAME)) {
+        input = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
+        if (!input) return false;
+    }
+    File output = LittleFS.open(temp, "w");
+    if (!output) return false;
+    bool ok = true; char line[Yokis::ConfigLineSize]; unsigned count = 0;
+    while (input && input.available() && ok) {
+        if (!readConfigLine(input, line, sizeof(line))) { ok = false; break; }
+        if (!line[0]) continue;
+        Device d("");
+        if (!parseConfigLine(line, d)) { ok = false; break; }
+        if ((removedName && strcmp(d.getName(), removedName) == 0) ||
+            (replacement && strcmp(d.getName(), replacement->getName()) == 0)) continue;
+        if (++count > 64 || output.println(line) != strlen(line) + 2) ok = false;
+    }
+    if (replacement && ok) {
+        ok = ++count <= 64 && replacement->formatConfigLine(line, sizeof(line));
+        if (ok) ok = output.println(line) == strlen(line) + 2;
+    }
+    output.flush(); ok = ok && !output.getWriteError();
+    input.close(); output.close();
+    // LittleFS rename replaces the old file atomically; never remove it first.
+    if (ok) ok = LittleFS.rename(temp, LITTLEFS_CONFIG_FILENAME);
+    if (!ok) { LittleFS.remove(temp); LOG.println("Configuration unchanged: write/validation failed"); }
+    return ok;
+}
+
 bool Device::storeRawConfig(const char* line) {
-    bool ret = true;
-
-    YokisLittleFS::init();
-
-    File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "a+");
-    if (!f) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - file open failed");
-        return false;
-    }
-
-    char buf[128];
-    sprintf(buf, "%s", line);
-    int bytesWritten = f.println(buf);
-    if (bytesWritten <= 0) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - cannot write to file");
-        ret = false;
-    }
-
-    f.close();
-    return ret;
+    Device d(""); return parseConfigLine(line, d) && d.saveToLittleFS();
 }
-
-bool Device::saveToLittleFS() {
-    bool ret = true;
-
-    YokisLittleFS::init();
-
-    // Search for this device if it is already stored
-    // delete the line if found
-    int line = Device::findInConfig(name);
-    Device::deleteLineInConfig(line);
-
-    File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "a+");
-    if (!f) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - file open failed");
-        return false;
-    }
-
-    char buf[128];
-    sprintf(buf, "%s%s%02x%02x%s%02x%s%02x%s%02x%s%02x%02x%02x%s%02x%02x%s%04d",
-            name, SEP, hardwareAddress[0], hardwareAddress[1], SEP, channel,
-            SEP, 0, SEP, 0, SEP, version[0], version[1],
-            version[2], SEP, serial[0], serial[1], SEP, mode);
-    int bytesWritten = f.println(buf);
-    if (bytesWritten <= 0) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - cannot write to file");
-        ret = false;
-    }
-
-    f.close();
-    return ret;
+bool Device::saveToLittleFS() { return isConfigured() && writeConfig(this, NULL, false); }
+bool Device::deleteFromConfig(const char* name) {
+    return Yokis::validDeviceName(name) && writeConfig(NULL, name, false);
 }
+bool Device::clearConfigFromLittleFS() { return writeConfig(NULL, NULL, true); }
 
-// Static - delete a device from LittleFS configuration
-void Device::deleteFromConfig(const char* deviceName) {
-    int line = Device::findInConfig(deviceName);
-    if (line != -1) Device::deleteLineInConfig(line);
-}
-
-// Static - load devices previously stored in the LittleFS memory area
-void Device::loadFromLittleFS(Device** devices, const unsigned int size) {
-    char buf[128];
-    char* tok;
-    uint16_t numLines = 0;
-    Device* d = NULL;
-    char uCharBuf[3];
-    uint8_t uIntBuf[3];
-
-    YokisLittleFS::init();
-
+int Device::loadFromLittleFS(Device** devices, const unsigned int size) {
+    if (!devices || !YokisLittleFS::init()) return -1;
+    if (!LittleFS.exists(LITTLEFS_CONFIG_FILENAME)) return 0;
     File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
-    if (!f) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - File open failed");
-        return;
-    }
-
-    // null terminate in advance
-    uCharBuf[2] = 0;
-
+    if (!f) return -1;
+    unsigned n = 0; bool ok = true; char line[Yokis::ConfigLineSize];
     while (f.available()) {
-        if (numLines >= size) break;
-
-        int l = f.readBytesUntil('\n', buf, sizeof(buf) - 1);
-        buf[l] = 0;
-
-        tok = strtok(buf, SEP);  // device name
-        d = new Device(tok);
-
-        tok = strtok(NULL,
-                     SEP);  // hw address as two bytes represented as 4 chars
-        d->setHardwareAddress(tok);
-
-        tok = strtok(NULL, SEP);  // channel represented as 2 chars
-        d->setChannel((uint8_t)strtoul(tok, NULL, 16));
-
-        tok = strtok(NULL, SEP);  // begin packet represented as 2 chars - not used anymore
-        //d->setBeginPacket((uint8_t)strtoul(tok, NULL, 16));
-
-        tok = strtok(NULL, SEP);  // end packet represented as 2 chars - not used anymore
-        //d->setEndPacket((uint8_t)strtoul(tok, NULL, 16));
-
-        tok = strtok(NULL, SEP);  // version represented as 6 chars
-        if (tok != NULL) {
-            strncpy(uCharBuf, tok, 2);
-            uIntBuf[0] = (uint8_t)strtoul(uCharBuf, NULL, 16);
-            strncpy(uCharBuf, tok + 2, 2);
-            uIntBuf[1] = (uint8_t)strtoul(uCharBuf, NULL, 16);
-            strncpy(uCharBuf, tok + 4, 2);
-            uIntBuf[2] = (uint8_t)strtoul(uCharBuf, NULL, 16);
-
-            d->setVersion(uIntBuf);
+        if (!readConfigLine(f, line, sizeof(line))) { ok = false; break; }
+        if (!line[0]) continue;
+        Device d("");
+        if (n >= size || !parseConfigLine(line, d) || getFromList(devices, n, d.getName())) {
+            ok = false; break;
         }
-
-        tok = strtok(NULL, SEP);  // Serial represented as 4 chars
-        if (tok != NULL) {
-            strncpy(uCharBuf, tok, 2);
-            uIntBuf[0] = (uint8_t)strtoul(uCharBuf, NULL, 16);
-            strncpy(uCharBuf, tok + 2, 2);
-            uIntBuf[1] = (uint8_t)strtoul(uCharBuf, NULL, 16);
-
-            d->setSerial(uIntBuf);
-        }
-
-        tok = strtok(NULL, SEP);  // Mode represented as 4 chars
-        if (tok != NULL) {
-            d->setMode((DeviceMode)strtoul(tok, NULL, 16));
-        }
-
-        // Store this device
-        devices[numLines++] = d;
-        LOG.print("Added new device: ");
-        LOG.println(d->getName());
-    }
-
-    f.close();
-}
-
-// static - display config file from LittleFS
-void Device::displayConfigFromLittleFS() {
-    YokisLittleFS::init();
-    File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
-    LOG.println("LittleFS configuration stored:");
-    while (f.available()) {
-        LOG.write(f.read());
+        devices[n] = new Device(&d);
+        if (!devices[n]) { ok = false; break; }
+        ++n;
     }
     f.close();
-}
-
-// static
-void Device::clearConfigFromLittleFS() {
-    YokisLittleFS::init();
-    File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "w");
-    if (f) f.close();
-}
-
-// static
-int Device::findInConfig(const char* deviceName) {
-    if (deviceName == NULL) return -1;
-
-    YokisLittleFS::init();
-    int currentLine = 1;
-    char buf[128];
-    char* tok;
-    int found = -1;
-
-    File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
-    if (!f) {
-        LOG.println("File open failed");
+    if (!ok) {
+        for (unsigned i = 0; i < n; ++i) { delete devices[i]; devices[i] = NULL; }
+        LOG.println("Invalid device configuration: existing in-memory devices preserved");
         return -1;
     }
-
-    while (f.available()) {
-        int l = f.readBytesUntil('\n', buf, sizeof(buf) - 1);
-        buf[l] = 0; // terminate string with a null char
-        tok = strtok(buf, SEP);
-        if (tok != NULL && strcmp(tok, deviceName) == 0) {
-            found = currentLine;
-            break;
-        }
-
-        currentLine++;
-    }
-
-    f.close();
-    return found;
+    return int(n);
 }
-
-// static
-void Device::deleteLineInConfig(int line) {
-    if(line <= 0) {
-        return;
-    }
-
-    YokisLittleFS::init();
-
-    char buf[128];
-    int currentLine = 1;
-
+void Device::displayConfigFromLittleFS() {
+    if (!YokisLittleFS::init()) return;
     File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
-    if (!f) {
-        LOG.print(LITTLEFS_CONFIG_FILENAME);
-        LOG.println(" - File open failed");
-        return;
-    }
-    File fbak = LittleFS.open(LITTLEFS_CONFIG_BAK_FILENAME, "w");
-    if (!fbak) {
-        LOG.print(LITTLEFS_CONFIG_BAK_FILENAME);
-        LOG.println(" - File open failed");
-        return;
-    }
-
-    while (f.available()) {
-        int l = f.readBytesUntil('\n', buf, sizeof(buf) - 1);
-        buf[l] = 0;
-        if (currentLine++ != line) {
-            int bytesWritten = fbak.println(buf);
-            if (bytesWritten <= 0) {
-                LOG.println("Cannot write to backup configuration file");
-            }
-        }
-    }
-
+    LOG.println("LittleFS configuration stored:");
+    while (f && f.available()) LOG.write(f.read());
     f.close();
-    fbak.close();
-    LittleFS.remove(LITTLEFS_CONFIG_FILENAME);
-    LittleFS.rename(LITTLEFS_CONFIG_BAK_FILENAME, LITTLEFS_CONFIG_FILENAME);
 }
-
 #endif

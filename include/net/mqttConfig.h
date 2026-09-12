@@ -24,12 +24,13 @@ class MqttConfig {
     public:
      MqttConfig();
      MqttConfig(const MqttConfig& config);
+     MqttConfig& operator=(const MqttConfig&) = default;
      MqttConfig(const char*, uint16_t, const char*, const char*);
      ~MqttConfig();
-     void setHost(const char*);
-     void setPort(uint16_t);
-     void setUsername(const char*);
-     void setPassword(const char*);
+     bool setHost(const char*);
+     bool setPort(uint16_t);
+     bool setUsername(const char*);
+     bool setPassword(const char*);
      char* getHost();
      uint16_t getPort();
      char* getUsername();

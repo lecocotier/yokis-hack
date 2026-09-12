@@ -23,7 +23,7 @@ jobs:
           retention-days: 7
       - name: Native regression tests
         run: |
-          if test -f tests/run_native.sh; then bash tests/run_native.sh; fi
+          bash tests/run_native.sh
       - name: Install PlatformIO
         run: python3 -m pip install platformio==6.1.18
       - name: Compile ESP8266 and Arduino Mega (no upload)
