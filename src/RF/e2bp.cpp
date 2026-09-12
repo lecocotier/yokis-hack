@@ -60,9 +60,15 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
 
     bool ret = false;
     const uint32_t start = millis();
+    if (device->getMode() == SHUTTER) {
+        device->shutterFeedback().begin(ds == SHUTTER_STOPPED ? Yokis::ShutterFeedback::Pause :
+            ds == SHUTTER_OPENING ? Yokis::ShutterFeedback::Up : Yokis::ShutterFeedback::Down, start);
+    }
     do { ret = sendPayload(buf); } while (!ret && device->getMode() != NO_RCPT && !Yokis::elapsed(millis(), start, 1000));
 
-    if (ret || device->getMode() == NO_RCPT) {  // if NO_RCPT, ignore ret
+    if (device->getMode() == SHUTTER) {
+        device->setStatus(device->shutterFeedback().finish(ret, millis()));
+    } else if (ret || device->getMode() == NO_RCPT) {  // if NO_RCPT, ignore ret
         device->setStatus(ds);
         if (device->getMode() == DIMMER) {
             if (ds == ON)
@@ -113,8 +119,9 @@ bool E2bp::toggle() {
     if (device->getMode() == SHUTTER) {
         // On the captured shutter protocol, 0x53 after 0x35 stops movement.
         // Send one toggle, not a repeated press/release train that cancels it.
+        device->shutterFeedback().begin(Yokis::ShutterFeedback::Toggle, millis());
         bool ok = press();
-        if (ok) device->setStatus(UNDEFINED); // direction is not known here
+        device->setStatus(device->shutterFeedback().finish(ok, millis()));
         return ok;
     }
     while (!Yokis::elapsed(millis(), start, 1000)) {
@@ -453,26 +460,19 @@ bool E2bp::runMainLoop() {
         // Devices answering 00 00 gives the same answer when closed or paused.
         // In such case home assistant will block the close command
         // Testing if a pause command was issued could be a possibility.
-        if ( device->getMode() == SHUTTER ) {
-            if (answerBuf[0] <= 1 && answerBuf[1] == 0) {
-                firstPayloadStatus = SHUTTER_STOPPED; // rest, endpoint not proven
-                LOG.println("Stopped (endpoint unknown)");
-            } else if ((answerBuf[0] & 0x21) == 0x21 && answerBuf[1] == 0x02) {
-                firstPayloadStatus = SHUTTER_OPENED;
-                LOG.println("Opened");
-            } else if ((answerBuf[0] & 0x11) == 0x10 && answerBuf[1] == 0x02) {
-                firstPayloadStatus = SHUTTER_CLOSED;
-                LOG.println("Closed");
-            } else if ( ((answerBuf[0] & 0x01) == 0x01 && answerBuf[1] == 0x03) || (answerBuf[0] == 0x01 && answerBuf[1] == 0x01) ) {
-                firstPayloadStatus = SHUTTER_OPENING;
-                LOG.println("Opening");
-            } else if (((answerBuf[0] & 0x01) == 0x00 && answerBuf[1] == 0x03) || (answerBuf[0] == 0x00 && answerBuf[1] == 0x01) ) {
-                firstPayloadStatus = SHUTTER_CLOSING;
-                LOG.println("Closing");
-            } else if (answerBuf[1] == 0x02) {  // To be tested last
-                firstPayloadStatus = SHUTTER_STOPPED;
-                LOG.println("Stopped");
-            }
+        if (device->getMode() == SHUTTER) {
+            Yokis::ShutterFeedback& feedback = device->shutterFeedback();
+            firstPayloadStatus = feedback.observe(answerBuf[0], answerBuf[1], millis());
+            LOG.print(feedback.pending() ? "Command reply (pre-state possible)" :
+                      Device::getStatusAsString(firstPayloadStatus));
+            LOG.print(" - Source: "); LOG.print(feedback.pending() ? "command_reply" : feedback.sourceName());
+            LOG.print(" - Time: "); LOG.print(millis());
+            LOG.print(" - Last cmd: "); LOG.print(feedback.commandName());
+            LOG.print(" - Cmd time: "); LOG.print(feedback.commandAt());
+            LOG.print(" - Delta: ");
+            if (feedback.hasCommand()) LOG.print(uint32_t(millis() - feedback.commandAt()));
+            else LOG.print("n/a");
+            LOG.print(" - Previous: "); LOG.println(Device::getStatusAsString(device->getStatus()));
         } else {
             if (firstPayloadStatus == UNDEFINED) {
                 if (answerBuf[1] == 1 || answerBuf[0] == 0x2f) {

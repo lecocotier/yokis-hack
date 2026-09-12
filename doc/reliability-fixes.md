@@ -38,9 +38,12 @@ L'absence de réponse ne prouve toutefois pas l'absence d'exécution physique.
 Les journaux indiquent la commande, le nombre de cycles et la présence d'un retour.
 
 Les deux réponses simples `00 00` et `01 00` ne prouvent pas à elles seules une
-fin de course sur toutes les variantes : elles sont représentées comme arrêtées,
-position inconnue. Les masques historiques plus riches sont conservés. Une
-réponse non reconnue reste inconnue : aucun masquage arbitraire des bits `40/80`.
+fin de course sur toutes les variantes. La révision `2026.09-shutter-context-1`
+réintègre l'estimation contextuelle du patch local : STOP récent, arrêt mémorisé,
+fin de course supposée sinon. L'estimation est distinguée du retour radio riche.
+Voir [la note de réintégration et ses limites](shutter-context-2026-09-12.md).
+Les masques historiques plus riches sont conservés ; aucun masquage arbitraire
+des bits `40/80` n'est appliqué.
 
 Le défaut d'affectation de `secondPayloadStatus` dans la branche non-volet est
 corrigé. Le changement d'état répété dans `dimmerMem()` est supprimé. La consigne
@@ -93,7 +96,8 @@ depuis la boucle principale, pas depuis le callback AsyncTCP. Les champs omis
 conservent leur valeur. Les ports sont numériques et compris entre 1 et 65535.
 Une réponse HTTP 202 signifie « mise en attente », pas « sauvegarde déjà réussie ».
 Le résultat d'application est indiqué sur la console. Le formulaire n'ajoute pas
-d'authentification dans cette branche.
+d'authentification dans cette branche. Le formatage automatique au montage
+LittleFS est maintenant désactivé pour protéger une configuration illisible.
 
 Les chaînes MQTT sont toujours terminées et les valeurs trop longues sont
 refusées sans écraser l'ancienne valeur : hôte 63 octets maximum, utilisateur et

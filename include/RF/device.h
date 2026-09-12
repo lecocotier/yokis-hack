@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "reliability.h"
+#include "RF/shutterFeedback.h"
 
 #if defined(ESP8266)
 #include <LittleFS.h>
@@ -28,8 +29,6 @@ enum DeviceMode {
     NO_RCPT,  // No reception, send blindly begin and end packets 30 times
     SHUTTER   // Shutter style devices (MVR500)
 };
-
-enum DeviceStatus { OFF = 0, ON, UNDEFINED, SHUTTER_OPENING, SHUTTER_CLOSING, SHUTTER_STOPPED, SHUTTER_OPENED, SHUTTER_CLOSED};
 
 enum DeviceAvailability { OFFLINE = 0, ONLINE };
 
@@ -60,6 +59,7 @@ class Device {
     volatile bool hasToBePolledForStatus;
     uint8_t failedPolls;
     Yokis::CommandHistory commandHistory;
+    Yokis::ShutterFeedback shutterFeedback_;
 
 #ifdef ESP8266
     static bool writeConfig(const Device* replacement, const char* removedName, bool clear);
@@ -90,6 +90,8 @@ class Device {
     const DeviceAvailability getAvailability() const;
     // Last time device status was updated
     const unsigned long getLastUpdateMillis() const;
+    Yokis::ShutterFeedback& shutterFeedback() { return shutterFeedback_; }
+    const Yokis::ShutterFeedback& shutterFeedback() const { return shutterFeedback_; }
     bool needsPolling();
     bool isConfigured() const;
     bool isDuplicateCommand(Yokis::Command cmd, uint32_t now) const;

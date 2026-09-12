@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
-struct FakeFsState {std::map<std::string,std::shared_ptr<std::string>> files;bool failWrites=false,failRename=false,failOpen=false;};
+struct FakeFsState {
+ bool failMount=false;std::map<std::string,std::shared_ptr<std::string>> files;bool failWrites=false,failRename=false,failOpen=false;};
 extern FakeFsState testFs;
 class File:public Print {
  std::shared_ptr<std::string> data_;size_t pos_=0;bool writable_=false;
@@ -19,9 +20,16 @@ public:
  void flush(){}
  void close(){data_.reset();}
 };
+class LittleFSConfig {
+public:
+ bool autoFormat=true;
+ void setAutoFormat(bool v){autoFormat=v;}
+};
 class FakeLittleFS {
 public:
- bool begin(){return true;}
+ bool autoFormat=true;
+ void setConfig(const LittleFSConfig& c){autoFormat=c.autoFormat;}
+ bool begin(){if(testFs.failMount){if(!autoFormat)return false;testFs.files.clear();}return true;}
  bool exists(const char*p){return testFs.files.count(p);}
  File open(const char*p,const char*m){if(testFs.failOpen)return {};bool w=m[0]!='r';bool a=m[0]=='a';auto it=testFs.files.find(p);if(it==testFs.files.end()){if(!w)return {};it=testFs.files.emplace(p,std::make_shared<std::string>()).first;}if(w&&!a)it->second->clear();return File(it->second,w,a);}
  bool remove(const char*p){return testFs.files.erase(p)>0;}
