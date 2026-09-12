@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "reliability.h"
+#include "postStopPolling.h"
 
 #include "RF/copy.h"
 #include "RF/e2bp.h"
@@ -153,6 +154,7 @@ void loop() {
     ArduinoOTA.handle();
 
     #if defined(MQTT_ENABLED)
+    expirePostStopChecks(); // deadline failure is metadata, never automatic RF
     g_mqtt->loop();
 
     if (g_mqtt->connected() && !g_mqtt->isDiscoveryDone()) {
@@ -164,14 +166,20 @@ void loop() {
             }
         }
         g_mqtt->setDiscoveryDone(complete);
-    } else if (g_mqtt->connected() && FLAG_IS_ENABLED(FLAG_POLLING)) {
+    }
+    // Drain already received commands before ANY automatic status query.
+    // No recursive MQTT calls from the radio; special RF modes retain ownership.
+    if (FLAG_IS_ENABLED(FLAG_POLLING) && IrqManager::irqType == E2BP &&
+        !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available() &&
+        !servicePostStopPolling() && !postStopChecksPending() && g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
         // One poll per main-loop iteration: queued commands get serviced
         // between devices instead of waiting through up to 64 timeouts.
         static uint8_t next = 0;
         for (uint8_t n = 0; n < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++n) {
             uint8_t i = next;
             next = (next + 1) % MQTT_MAX_NUM_OF_YOKIS_DEVICES;
-            if (g_devices[i] && g_devices[i]->needsPolling()) {
+            if (g_devices[i] && g_devices[i]->needsPolling() &&
+                !g_devices[i]->shutterFeedback().verification().pending()) {
                 pollForStatus(g_devices[i]); break;
             }
         }
@@ -189,6 +197,7 @@ void pollForStatus(Device* d) {
     if (!d || d->getMode() == NO_RCPT) return;
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
+    const bool checking = d->getMode() == SHUTTER && d->shutterFeedback().verification().pending();
     DeviceStatus ds = g_bp->pollForStatus();
     
     if (g_bp->hasResponse()) {  // reachability is separate from decoding
@@ -215,6 +224,12 @@ void pollForStatus(Device* d) {
         } else {
             g_mqtt->notifyPower(d);
         }
+    } else if (checking) {
+        // Fast verification retries are not three independent periodic failures:
+        // don't declare a reachable device Offline within a fraction of a second.
+        d->clearPollingRequest();
+        d->setStatus(ds);
+        g_mqtt->notifyPower(d);
     } else {
         if (d->pollingFailed() >= DEVICE_MAX_FAILED_POLLING_BEFORE_OFFLINE) {
             // Device is unreachable

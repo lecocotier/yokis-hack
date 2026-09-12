@@ -13,6 +13,8 @@
 
 class Mqtt : public PubSubClient, public MqttConfig {
    private:
+    WiFiClient& transport_;
+    bool inputHandled_ = false;
     uint32_t lastConnectionRetry = 0;
     bool connectionAttempted = false;
     char* subscribedTopics[MQTT_MAX_SUBSCRIPTIONS];
@@ -33,6 +35,8 @@ class Mqtt : public PubSubClient, public MqttConfig {
     void clearSubscriptions();
     bool reconnect(bool=false);
     boolean loop();
+    bool hasPendingInput() { return connected() && transport_.available() > 0; }
+    bool handledInput() const { return inputHandled_; }
 };
 
 #endif

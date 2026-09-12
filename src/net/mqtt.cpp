@@ -4,7 +4,7 @@
 #include "globals.h"
 #include "reliability.h"
 
-Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig() {
+Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig(), transport_(wifiClient) {
     // Init subscriptions to NULL
     subscribedTopicIdx = 0;
     for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; i++) {
@@ -13,7 +13,7 @@ Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig() {
 }
 
 Mqtt::Mqtt(WiFiClient& wifiClient, MqttConfig& mqttConfig)
-    : PubSubClient(wifiClient), MqttConfig(mqttConfig) {
+    : PubSubClient(wifiClient), MqttConfig(mqttConfig), transport_(wifiClient) {
     this->setCallback(Mqtt::callback);
 
     // Init subscriptions to NULL
@@ -105,6 +105,7 @@ bool Mqtt::reconnect(bool force) {
 }
 
 boolean Mqtt::loop() {
+    inputHandled_ = false;
     if (this->MqttConfig::isEmpty()) {
         return false;
     }
@@ -113,7 +114,9 @@ boolean Mqtt::loop() {
         this->reconnect();
     }
 
-    // Call parent function
+    // PubSubClient handles one packet per invocation. Main loop yields to
+    // another packet/command before starting an automatic radio query.
+    inputHandled_ = hasPendingInput();
     return PubSubClient::loop();
 }
 
