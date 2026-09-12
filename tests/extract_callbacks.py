@@ -23,4 +23,4 @@ for name in ('pollForStatus', 'mqttCallback', 'loop'):
             if depth==0:
                 functions.append(text[m.start():t.end()]);break
     else: raise RuntimeError('Unbalanced function '+name)
-(root/'tests/build/callbacks.cpp').write_text('#include "globals.h"\n#include "reliability.h"\n'+ '\n'.join(functions) if (root/'include/reliability.h').exists() else '#include "globals.h"\n'+'\n'.join(functions))
+(root/'tests/build/callbacks.cpp').write_text('#include "globals.h"\n#include "reliability.h"\n#include "RF/irqManager.h"\n#include "postStopPolling.h"\n'+ '\n'.join(functions) if (root/'include/reliability.h').exists() else '#include "globals.h"\n'+'\n'.join(functions))

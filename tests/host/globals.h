@@ -1,12 +1,10 @@
 #pragma once
 #include <Arduino.h>
 #include "RF/device.h"
-#include "postStopPolling.h"
 #include "RF/e2bp.h"
 #include "RF/pairing.h"
 #include "RF/copy.h"
 #include "RF/scanner.h"
-#include "RF/irqManager.h"
 #include "net/mqttHass.h"
 #include "serial/serialHelper.h"
 #include <Ticker.h>

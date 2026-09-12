@@ -141,7 +141,7 @@ activé. Les reprises Wi-Fi/LWT et le problème bas niveau SPI restent hors pér
 
 Sauvegarder dConfigFS/mqttDiag en privé et conserver le firmware précédent.
 Récupérer cette branche sans écraser les changements locaux non enregistrés.
-Compiler `pio run -e d1_mini_ota`, puis firmware seul vers l'IP vérifiée :
+Compiler `pio run -e d1_mini_ota --upload-port 192.168.0.112`, puis firmware seul vers l'IP vérifiée :
 `pio run -e d1_mini_ota -t upload --upload-port 192.168.0.112`.
 Ne pas exécuter uploadfs, erase ni format.
 
@@ -150,3 +150,17 @@ intermédiaire de VrSalon puis la reprise, et quelques STOP de volets distincts.
 Comparer chronologie des commandes, traces post-STOP, états et mouvement réel,
 en respectant le service intermittent des moteurs. Un résultat stopped_observed
 n'est pas une preuve de fin de course et ne doit pas servir d'interverrouillage.
+
+### Vérification complémentaire après reprise
+
+La première CI du patch a révélé un include manquant de `RF/irqManager.h`
+dans `src/postStopPolling.cpp`. Le substitut globals.h des tests l'importait
+indirectement et masquait ce défaut. Les tests ont été alignés sur les imports
+réels, l'erreur reproduite sur PC puis l'include ajouté dans le fichier concerné.
+
+La cible ESP8266 OTA exige également une adresse de destination dès la préparation
+de la compilation, même sans cible `upload`. La CI fournit uniquement une adresse
+loopback avec `--upload-port 127.0.0.1` pour satisfaire cette validation : elle ne
+lance aucun téléversement. En local, passer l'adresse vérifiée de l'ESP avec
+`--upload-port 192.168.0.112` dans les deux commandes ci-dessus. Aucune adresse
+n'est imposée dans le firmware ni dans platformio.ini.
