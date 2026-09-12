@@ -5,6 +5,7 @@
 #include "reliability.h"
 
 Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig(), transport_(wifiClient) {
+    initializeIdentity();
     // Init subscriptions to NULL
     subscribedTopicIdx = 0;
     for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; i++) {
@@ -16,6 +17,7 @@ Mqtt::Mqtt(WiFiClient& wifiClient, MqttConfig& mqttConfig)
     : PubSubClient(wifiClient), MqttConfig(mqttConfig), transport_(wifiClient) {
     this->setCallback(Mqtt::callback);
 
+    initializeIdentity();
     // Init subscriptions to NULL
     subscribedTopicIdx = 0;
     for (uint16_t i = 0; i < MQTT_MAX_SUBSCRIPTIONS; i++) {
@@ -71,14 +73,36 @@ void Mqtt::clearSubscriptions() {
     }
     subscribedTopicIdx = 0;
 }
-Mqtt::~Mqtt() { clearSubscriptions(); }
+Mqtt::~Mqtt() { disconnect(); clearSubscriptions(); }
+
+void Mqtt::initializeIdentity() {
+    // Chip identity is stable across reconnects/reboots; no saved config migration.
+    snprintf(clientId_, sizeof(clientId_), "YokisHack-%06lx", (unsigned long)ESP.getChipId());
+    snprintf(gatewayTopic_, sizeof(gatewayTopic_), "yokis/%s/availability", clientId_);
+    setSocketTimeout(2); // Bound MQTT response waits; TCP/DNS have their own timeouts.
+}
+
+void Mqtt::announceGateway() {
+    if (connected() && gatewayOnlinePending_) {
+        lastGatewayPublish_ = millis();
+        if (publish(gatewayTopic_, "Online", true)) gatewayOnlinePending_ = false;
+    }
+}
+
+void Mqtt::disconnect() {
+    if (connected()) {
+        // A clean MQTT disconnect cancels the will. Publish Offline first.
+        if (publish(gatewayTopic_, "Offline", true)) PubSubClient::disconnect();
+        else transport_.stop(); // leave an unclean session so the broker uses the will
+    }
+    gatewayOnlinePending_ = true;
+}
 
 // force=false by default
 bool Mqtt::reconnect(bool force) {
     // No configuration available
-    if (this->MqttConfig::isEmpty()) {
-        return false;
-    }
+    if (this->MqttConfig::isEmpty() || WiFi.status() != WL_CONNECTED) return false;
+    if (connected()) return true;
 
     uint32_t now = millis();
     if (!force && connectionAttempted && !Yokis::elapsed(now, lastConnectionRetry, MQTT_CONNECT_RETRY_EVERY_MS))
@@ -86,14 +110,15 @@ bool Mqtt::reconnect(bool force) {
     lastConnectionRetry = now; connectionAttempted = true;
 
     char buf[128];
-    String clientId = "YokisHack-";
-    clientId += String(random(0xffff), HEX);
 
-    snprintf(buf, sizeof(buf), "Connecting to MQTT %s:%hu with client ID=%s... ", getHost(), getPort(), clientId.c_str());
+    snprintf(buf, sizeof(buf), "Connecting to MQTT %s:%hu with client ID=%s... ", getHost(), getPort(), clientId_);
     LOG.print(buf);
 
-    if (this->connect(clientId.c_str(), getUsername(), getPassword())) {
+    if (this->connect(clientId_, getUsername(), getPassword(),
+                      gatewayTopic_, 1, true, "Offline")) {
         LOG.println("connected");
+        gatewayOnlinePending_ = true;
+        announceGateway();
         connectionEstablished();
         this->resubscribe();  // resubscribe to all configured topics
     } else {
@@ -110,9 +135,16 @@ boolean Mqtt::loop() {
         return false;
     }
 
-    if(!this->connected()) {
-        this->reconnect();
+    if (WiFi.status() != WL_CONNECTED) {
+        // Do not block in a broker connect while the station is disconnected.
+        // No MQTT DISCONNECT: the broker will publish the gateway's will.
+        if (connected()) transport_.stop();
+        gatewayOnlinePending_ = true;
+        return false;
     }
+    if (!connected()) reconnect();
+    if (gatewayOnlinePending_ && Yokis::elapsed(millis(), lastGatewayPublish_, 500))
+        announceGateway();
 
     // PubSubClient handles one packet per invocation. Main loop yields to
     // another packet/command before starting an automatic radio query.

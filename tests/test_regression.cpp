@@ -1,6 +1,7 @@
 #include "globals.h"
 #include "commands/callbacks.h"
 #include "reliability.h"
+#include "net/wifi.h"
 #include <iostream>
 #include <new>
 #include <fstream>
@@ -14,11 +15,6 @@ Ticker* g_deviceStatusPollers[MQTT_MAX_NUM_OF_YOKIS_DEVICES]={};
 E2bp* g_bp=nullptr;Pairing* g_pairingRF=nullptr;Scanner* g_scanner=nullptr;Copy* g_copy=nullptr;
 Device* g_currentDevice=nullptr;MqttHass* g_mqtt=nullptr;SerialHelper* g_serial=nullptr;
 volatile IrqType IrqManager::irqType=E2BP;
-void setupWifi(String s,String p){WiFi.ssid=s;WiFi.psk_=p;}
-void setupWifi(){}
-void setupWifiAP(){}
-int reconnectWifi(){return 0;}
-bool resetWifiConfig(){return true;}
 static int checks=0,failures=0;
 #define CHECK(c) do{++checks;if(!(c)){++failures;std::cerr<<"FAIL "<<__LINE__<<": "<<#c<<"\n";}}while(0)
 const uint8_t address[]={1,2,1,2,2};
@@ -41,6 +37,7 @@ std::string published(const char* topic) {
 }
 void pollReply(Device* d,uint8_t a,uint8_t b){testRadio.replies.push_back({a,b});pollForStatus(d);}
 #include "poststop_cases.h"
+#include "network_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -234,7 +231,7 @@ int main(){
  all=true;for(int i=0;i<64;++i){std::string name="light"+std::to_string(i);Device light(name.c_str(),address,1);light.setMode(DIMMER);all=g_mqtt->subscribeDevice(&light)&&all;}CHECK(all);
  g_mqtt->clearSubscriptions();g_mqtt->failSubscribe=true;CHECK(!g_mqtt->subscribeDevice(d));g_mqtt->failSubscribe=false;
  g_mqtt->setDiscoveryDone(false);g_mqtt->failSubscribe=true;loop();CHECK(!g_mqtt->isDiscoveryDone());
- g_mqtt->failSubscribe=false;loop();CHECK(g_mqtt->isDiscoveryDone());
+ g_mqtt->failSubscribe=false;testClockUs+=200000;loop();CHECK(g_mqtt->isDiscoveryDone());
 
  // A partial HTTP MQTT change preserves every omitted field; invalid requests
  // queue nothing. Production handler and deferred apply are both executed.
@@ -259,6 +256,7 @@ int main(){
  for(int i=1;i<64;++i){g_devices[i]=d;}CHECK(displayDevices(nullptr));for(int i=1;i<64;++i){g_devices[i]=nullptr;}
 
  testPostStopPolling(d, wifi);
+ testNetwork(d, wifi);
 
  // Save/reload replaces borrowed pointers and clears subscriptions safely.
  CHECK(reloadConfig(nullptr));CHECK(g_bp->getDevice()==nullptr);CHECK(!g_mqtt->isDiscoveryDone());

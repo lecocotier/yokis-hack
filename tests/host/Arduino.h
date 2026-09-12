@@ -96,5 +96,5 @@ inline int digitalRead(int){return HIGH;}
 inline int digitalPinToInterrupt(int p){return p;}
 inline void attachInterrupt(int,void(*)(),int){}
 inline void detachInterrupt(int){}
-struct FakeESP{void restart(){}unsigned getFlashChipId(){return 1;}};
+struct FakeESP{unsigned restartCount=0;uint32_t chipId=0x123456;void restart(){++restartCount;}unsigned getFlashChipId(){return 1;}uint32_t getChipId(){return chipId;}};
 extern FakeESP ESP;

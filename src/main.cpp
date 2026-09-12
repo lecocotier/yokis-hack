@@ -104,6 +104,9 @@ void setup() {
 
     // OTA
     ArduinoOTA.onStart([]() {
+#ifdef MQTT_ENABLED
+        if (g_mqtt) g_mqtt->disconnect();
+#endif
         String type;
         if (ArduinoOTA.getCommand() == U_FLASH) {
             type = "sketch";
@@ -157,16 +160,8 @@ void loop() {
     expirePostStopChecks(); // deadline failure is metadata, never automatic RF
     g_mqtt->loop();
 
-    if (g_mqtt->connected() && !g_mqtt->isDiscoveryDone()) {
-        bool complete = true;
-        for (uint8_t i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
-            if (g_devices[i] && (!g_mqtt->publishDevice(g_devices[i]) ||
-                                !g_mqtt->subscribeDevice(g_devices[i]))) {
-                complete = false; break;
-            }
-        }
-        g_mqtt->setDiscoveryDone(complete);
-    }
+    if (!g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available() &&
+        !postStopChecksPending()) g_mqtt->serviceRefresh(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     // Drain already received commands before ANY automatic status query.
     // No recursive MQTT calls from the radio; special RF modes retain ownership.
     if (FLAG_IS_ENABLED(FLAG_POLLING) && IrqManager::irqType == E2BP &&
@@ -252,6 +247,7 @@ void pollForStatus(Device* d) {
 
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+    if (g_mqtt && g_mqtt->handleBirth(topic, payload, length)) return;
     Yokis::MqttRequest request;
     if (!Yokis::parseMqtt(topic, payload, length, request)) {
         LOG.println("MQTT command rejected: invalid topic or payload"); return;
