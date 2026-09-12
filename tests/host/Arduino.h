@@ -96,6 +96,5 @@ inline int digitalRead(int){return HIGH;}
 inline int digitalPinToInterrupt(int p){return p;}
 inline void attachInterrupt(int,void(*)(),int){}
 inline void detachInterrupt(int){}
-inline size_t strlcpy(char*d,const char*s,size_t n){size_t l=strlen(s);if(n){size_t k=std::min(l,n-1);memcpy(d,s,k);d[k]=0;}return l;}
 struct FakeESP{void restart(){}unsigned getFlashChipId(){return 1;}};
 extern FakeESP ESP;
