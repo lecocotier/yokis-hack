@@ -1,5 +1,6 @@
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 #include "globals.h"
+#include "RF/irqManager.h"
 #include "postStopPolling.h"
 void pollForStatus(Device* device);
 

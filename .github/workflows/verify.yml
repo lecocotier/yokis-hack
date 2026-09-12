@@ -29,7 +29,9 @@ jobs:
       - name: Validate MQTT JSON and Home Assistant value template
         run: python3 tests/check_mqtt_json.py
       - name: Compile ESP8266 and Arduino Mega (no upload)
-        run: pio run -e d1_mini -e d1_mini_ota -e megaatmega2560
+        # The ESP8266 builder validates an OTA destination even for build-only.
+        # Loopback is a CI-only placeholder. No upload target is ever invoked.
+        run: pio run -e d1_mini -e d1_mini_ota -e megaatmega2560 --upload-port 127.0.0.1
       - name: Keep firmware build outputs
         if: success()
         uses: actions/upload-artifact@v4
