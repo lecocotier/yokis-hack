@@ -3,6 +3,7 @@
 #include "reliability.h"
 #include <iostream>
 #include <new>
+#include <fstream>
 
 FakeLog Serial; FakeESP ESP; FakeFsState testFs; FakeLittleFS LittleFS; FakeWiFi WiFi;
 uint64_t testClockUs=10000000; std::function<void()> testYield; RadioFixture testRadio;
@@ -32,7 +33,19 @@ void freshDevice(){
  Serial.out.clear();
 }
 void drainSerial(){while(Serial.available())g_serial->readFromSerial();}
+// Production API only: no rewritten decoder in these regression tests.
+std::string published(const char* topic) {
+ for (auto it=g_mqtt->publications.rbegin();it!=g_mqtt->publications.rend();++it)
+  if(it->first==topic)return it->second;
+ return "";
+}
+void pollReply(Device* d,uint8_t a,uint8_t b){testRadio.replies.push_back({a,b});pollForStatus(d);}
 int main(){
+ // A mount failure must not autoformat stored RF/MQTT parameters.
+ testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
+ testFs.failMount=true;
+ CHECK(!YokisLittleFS::init());CHECK(testFs.files.count("/keep.conf")==1);
+ testFs.failMount=false;
  WiFiClient wifi;
  g_mqtt=new MqttHass(wifi);g_bp=new E2bp(1,2);
  g_pairingRF=new Pairing(1,2);g_scanner=new Scanner(1,2);g_copy=new Copy(1,2);
@@ -76,8 +89,92 @@ int main(){
  freshDevice();testRadio.replies.push_back({0x25,0x42});pollForStatus(d);
  CHECK(g_bp->hasResponse());CHECK(d->isOnline());CHECK(d->getFailedPollings()==0);CHECK(d->getStatus()==UNDEFINED);
  const uint8_t replies[][2]={{0x2f,2},{0x1e,2},{1,1},{0,1},{0xf,2},{0,0},{1,0}};
- const DeviceStatus expected[]={SHUTTER_OPENED,SHUTTER_CLOSED,SHUTTER_OPENING,SHUTTER_CLOSING,SHUTTER_STOPPED,SHUTTER_STOPPED,SHUTTER_STOPPED};
+ const DeviceStatus expected[]={SHUTTER_OPENED,SHUTTER_CLOSED,SHUTTER_OPENING,SHUTTER_CLOSING,SHUTTER_STOPPED,SHUTTER_CLOSED,SHUTTER_OPENED};
  for(unsigned i=0;i<7;++i){freshDevice();testRadio.replies.push_back({replies[i][0],replies[i][1]});pollForStatus(d);CHECK(d->getStatus()==expected[i]);}
+
+ // User trace: complete descent and partial descent share the same 00 00.
+ // Reintroduce the original 5-second STOP context, not a false raw end switch.
+ freshDevice();pollReply(d,1,0);CHECK(d->getStatus()==SHUTTER_OPENED);
+ testRadio.replies.push_back({1,0});command("OFF");
+ pollReply(d,0,1);CHECK(d->getStatus()==SHUTTER_CLOSING);
+ testRadio.replies.push_back({0,1});command("PAUSE");
+ pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ testClockUs+=12000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ CHECK(published("volet/tele/DETAIL").find("command_stop_estimate")!=std::string::npos);
+ CHECK(published("volet/tele/STATE")=="{\"POWER\":\"stopped\"}");
+ // A new directional order must clear the old stop, even if a poll missed motion.
+ testRadio.replies.push_back({0,0});command("OFF");
+ pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ CHECK(published("volet/tele/DETAIL").find("simple_rf_estimate")!=std::string::npos);
+ // Mirror path: partial opening/STOP then an opening allowed to complete.
+ testRadio.replies.push_back({0,0});command("ON");pollReply(d,1,1);
+ testRadio.replies.push_back({1,0});command("PAUSE");
+ pollReply(d,1,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ testClockUs+=12000000;pollReply(d,1,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ testRadio.replies.push_back({1,0});command("ON");
+ pollReply(d,1,0);CHECK(d->getStatus()==SHUTTER_OPENED);
+ // Observed motion from an external control also clears the latched STOP.
+ testRadio.replies.push_back({1,0});command("PAUSE");pollReply(d,1,0);
+ pollReply(d,0,1);pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ // Preserve the executed 5000ms window when no stopped reply was seen yet.
+ freshDevice();testRadio.replies.push_back({0,1});command("PAUSE");
+ testClockUs+=4000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ freshDevice();testRadio.replies.push_back({0,1});command("PAUSE");
+ testClockUs+=6000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ // No RX is not a successful STOP, nor proof of the endpoint on the next poll.
+ freshDevice();command("PAUSE");pollReply(d,0,0);CHECK(d->getStatus()==UNDEFINED);
+ pollReply(d,0,1);pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ // Rich status bytes keep precedence over the estimation.
+ testRadio.replies.push_back({0,0});command("PAUSE");
+ pollReply(d,0x10,2);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ CHECK(published("volet/tele/DETAIL").find("rf_status")!=std::string::npos);
+ // Time arithmetic remains correct when STOP occurs across rollover.
+ freshDevice();testClockUs=(uint64_t(UINT32_MAX)-100)*1000;
+ testRadio.replies.push_back({0,1});command("PAUSE");
+ testClockUs+=1000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ // Configuration parsing/boot resets volatile context, never restores old STOP.
+ freshDevice();testRadio.replies.push_back({0,0});command("PAUSE");
+ freshDevice();pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ // Several near-simultaneous deliveries: distinct device contexts and addresses.
+ const uint8_t secondAddress[]={3,4,3,4,4};
+ Device* other=new Device("second",secondAddress,48);other->setMode(SHUTTER);g_devices[1]=other;
+ testRadio.replies.push_back({0,0});command("PAUSE");
+ for(int i=0;i<8;++i){
+  unsigned count=testRadio.writes;
+  testRadio.replies.push_back({0,0});deliver("second/cmnd/POWER","OFF");
+  CHECK(testRadio.writes==count+1);CHECK(other->getStatus()==SHUTTER_CLOSING);
+  CHECK(testRadio.destinations.back().first==48);
+  CHECK(testRadio.destinations.back().second==std::vector<uint8_t>(secondAddress,secondAddress+5));
+ }
+ pollReply(other,0,0);CHECK(other->getStatus()==SHUTTER_CLOSED);
+ pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
+ // A timeout on one device does not suppress the next device's command.
+ testRadio.replies.clear();deliver("second/cmnd/POWER","ON");
+ unsigned afterTimeout=testRadio.writes;testRadio.replies.push_back({0,0});command("OFF");
+ CHECK(testRadio.writes==afterTimeout+1);CHECK(d->getStatus()==SHUTTER_CLOSING);
+ CHECK(testRadio.destinations.back().first==47);
+ CHECK(testRadio.destinations.back().second==std::vector<uint8_t>(address,address+5));
+ g_devices[1]=nullptr;delete other;
+ // HA must not reinterpret a stopped descent as a closed endpoint.
+ freshDevice();g_mqtt->publishDevice(d);std::string discovery=published("homeassistant/cover/volet/config");
+ CHECK(std::string(discovery).find("\"optimistic\":true")!=std::string::npos);
+ CHECK(std::string(discovery).find("'None' if value_json.POWER == 'stopped'")!=std::string::npos);
+ CHECK(std::string(discovery).find("~tele/DETAIL")!=std::string::npos);
+ std::ofstream("tests/build/shutter-discovery.json")<<discovery;
+ testRadio.replies.push_back({0,0});command("PAUSE");pollReply(d,0,0);
+ std::ofstream("tests/build/shutter-detail.json")<<published("volet/tele/DETAIL");
+ {Device longest(std::string(48,'x').c_str(),address,1);longest.setMode(SHUTTER);
+  g_mqtt->publishDevice(&longest);std::string maxDiscovery=published(("homeassistant/cover/"+std::string(48,'x')+"/config").c_str());
+  CHECK(maxDiscovery.size()+strlen("homeassistant/cover//config")+48+7<MQTT_MAX_PACKET_SIZE);}
+
+ // Exact STOP window boundary (the real production estimator, synthetic clock).
+ for(uint32_t delta : {uint32_t(4999),uint32_t(5000)}) {
+  Yokis::ShutterFeedback f;f.begin(Yokis::ShutterFeedback::Pause,UINT32_MAX-100);
+  CHECK(f.observe(0,1,UINT32_MAX-90)==UNDEFINED); // command reply not a poll
+  CHECK(f.finish(true,UINT32_MAX-80)==SHUTTER_STOPPED);
+  CHECK(f.observe(0,0,uint32_t(UINT32_MAX-100+delta))==
+      (delta<5000 ? SHUTTER_STOPPED : SHUTTER_CLOSED));
+ }
 
  // Deadlines on both sides of millis rollover; retry no response remains finite.
  freshDevice();testClockUs=(uint64_t(UINT32_MAX)-200)*1000;

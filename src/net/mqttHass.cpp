@@ -61,11 +61,11 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
         snprintf(buf, MQTT_MAX_PACKET_SIZE,
                 "{"
                 "\"name\":\"Shutter %s\","
-                "\"optimistic\":false,"  // if false, cannot know the status
-                                             // of the device
+                "\"optimistic\":true,"  // Preserve control when position is only inferred.
                 "\"cmd_t\":\"~cmnd/POWER\","
                 "\"state_topic\":\"~tele/STATE\","
-                "\"val_tpl\":\"{{value_json.POWER}}\","
+                "\"val_tpl\":\"{{ 'None' if value_json.POWER == 'stopped' else value_json.POWER }}\","
+                "\"json_attr_t\":\"~tele/DETAIL\","
 //                "\"tilt_status_topic\": \"~tele/TILT\","
 //                "\"tilt_status_template\":\"{{value_json.TILT}}\","
                 "\"avty_t\":\"~tele/LWT\","
@@ -174,6 +174,24 @@ void MqttHass::notifyPower(const Device* device, DeviceStatus ds) {
     snprintf(buf, 96, "%s/tele/STATE", device->getName());
     sprintf(bufPayload, "{\"POWER\":\"%s\"}", (device->getMode() == SHUTTER && ds == UNDEFINED) ? "None" : Device::getStatusAsString(ds));
     publish(buf, bufPayload, false);
+    if (device->getMode() == SHUTTER) {
+        const Yokis::ShutterFeedback& feedback = device->shutterFeedback();
+        char detail[320];
+        char raw[6] = "none";
+        if (feedback.rawValid()) snprintf(raw, sizeof(raw), "%02X %02X", feedback.raw0(), feedback.raw1());
+        const bool known = ds != UNDEFINED;
+        snprintf(detail, sizeof(detail),
+            "{\"yokis_state\":\"%s\",\"state_source\":\"%s\",\"state_estimated\":%s,"
+            "\"last_command\":\"%s\",\"last_command_ms\":%lu,\"command_response\":%s,"
+            "\"raw_response\":\"%s\",\"raw_origin\":\"%s\"}",
+            known ? Device::getStatusAsString(ds) : "unknown",
+            known ? feedback.sourceName() : "unknown",
+            known && feedback.estimated() ? "true" : "false", feedback.commandName(),
+            (unsigned long)feedback.commandAt(), feedback.commandResponse() ? "true" : "false",
+            raw, feedback.rawOrigin());
+        snprintf(buf, sizeof(buf), "%s/tele/DETAIL", device->getName());
+        publish(buf, detail, false);
+    }
 }
 
 void MqttHass::notifyBrightness(const Device* device) {

@@ -25,7 +25,9 @@ jobs:
         run: |
           bash tests/run_native.sh
       - name: Install PlatformIO
-        run: python3 -m pip install platformio==6.1.18
+        run: python3 -m pip install platformio==6.1.18 Jinja2==3.1.6
+      - name: Validate MQTT JSON and Home Assistant value template
+        run: python3 tests/check_mqtt_json.py
       - name: Compile ESP8266 and Arduino Mega (no upload)
         run: pio run -e d1_mini -e megaatmega2560
       - name: Keep firmware build outputs
