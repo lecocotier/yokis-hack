@@ -40,6 +40,7 @@ std::string published(const char* topic) {
  return "";
 }
 void pollReply(Device* d,uint8_t a,uint8_t b){testRadio.replies.push_back({a,b});pollForStatus(d);}
+#include "poststop_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -116,13 +117,15 @@ int main(){
  // Observed motion from an external control also clears the latched STOP.
  testRadio.replies.push_back({1,0});command("PAUSE");pollReply(d,1,0);
  pollReply(d,0,1);pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
- // Preserve the executed 5000ms window when no stopped reply was seen yet.
+ // A deferred verification must expire to UNKNOWN, never a false endpoint.
  freshDevice();testRadio.replies.push_back({0,1});command("PAUSE");
  testClockUs+=4000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_STOPPED);
  freshDevice();testRadio.replies.push_back({0,1});command("PAUSE");
- testClockUs+=6000000;pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
+ testClockUs+=6000000;pollReply(d,0,0);CHECK(d->getStatus()==UNDEFINED);
  // No RX is not a successful STOP, nor proof of the endpoint on the next poll.
  freshDevice();command("PAUSE");pollReply(d,0,0);CHECK(d->getStatus()==UNDEFINED);
+ pollReply(d,0,1);pollReply(d,0,0);CHECK(d->getStatus()==UNDEFINED);
+ // Motion observed after the inconclusive campaign can restore an estimate.
  pollReply(d,0,1);pollReply(d,0,0);CHECK(d->getStatus()==SHUTTER_CLOSED);
  // Rich status bytes keep precedence over the estimation.
  testRadio.replies.push_back({0,0});command("PAUSE");
@@ -167,13 +170,13 @@ int main(){
   g_mqtt->publishDevice(&longest);std::string maxDiscovery=published(("homeassistant/cover/"+std::string(48,'x')+"/config").c_str());
   CHECK(maxDiscovery.size()+strlen("homeassistant/cover//config")+48+7<MQTT_MAX_PACKET_SIZE);}
 
- // Exact STOP window boundary (the real production estimator, synthetic clock).
+ // Verification budget starts at transaction completion, across rollover.
  for(uint32_t delta : {uint32_t(4999),uint32_t(5000)}) {
   Yokis::ShutterFeedback f;f.begin(Yokis::ShutterFeedback::Pause,UINT32_MAX-100);
   CHECK(f.observe(0,1,UINT32_MAX-90)==UNDEFINED); // command reply not a poll
   CHECK(f.finish(true,UINT32_MAX-80)==SHUTTER_STOPPED);
-  CHECK(f.observe(0,0,uint32_t(UINT32_MAX-100+delta))==
-      (delta<5000 ? SHUTTER_STOPPED : SHUTTER_CLOSED));
+  CHECK(f.observe(0,0,uint32_t(UINT32_MAX-80+delta))==
+      (delta<5000 ? SHUTTER_STOPPED : UNDEFINED));
  }
 
  // Deadlines on both sides of millis rollover; retry no response remains finite.
@@ -254,6 +257,8 @@ int main(){
  Serial.feed(std::string(300,'x')+"poll\n");drainSerial();CHECK(g_ConfigFlags==flags);
  // Full table used by dConfig must be bounded, with no sentinel past slot 63.
  for(int i=1;i<64;++i){g_devices[i]=d;}CHECK(displayDevices(nullptr));for(int i=1;i<64;++i){g_devices[i]=nullptr;}
+
+ testPostStopPolling(d, wifi);
 
  // Save/reload replaces borrowed pointers and clears subscriptions safely.
  CHECK(reloadConfig(nullptr));CHECK(g_bp->getDevice()==nullptr);CHECK(!g_mqtt->isDiscoveryDone());

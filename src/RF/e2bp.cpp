@@ -41,8 +41,6 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
 
     if (!device || !device->isConfigured()) return false;
     reset();
-    setupRFModule();
-    if (!radioReady) return false;
     // For all devices, use the on or off payload except for shutters
     if(device->getMode() == SHUTTER ) {
         if (ds == SHUTTER_STOPPED) {
@@ -63,6 +61,12 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
     if (device->getMode() == SHUTTER) {
         device->shutterFeedback().begin(ds == SHUTTER_STOPPED ? Yokis::ShutterFeedback::Pause :
             ds == SHUTTER_OPENING ? Yokis::ShutterFeedback::Up : Yokis::ShutterFeedback::Down, start);
+    }
+    setupRFModule();
+    if (!radioReady) {
+        if (device->getMode() == SHUTTER)
+            device->setStatus(device->shutterFeedback().finish(false, millis()));
+        return false;
     }
     do { ret = sendPayload(buf); } while (!ret && device->getMode() != NO_RCPT && !Yokis::elapsed(millis(), start, 1000));
 
@@ -114,12 +118,17 @@ bool E2bp::toggle() {
     bool retPress = false, retRelease = false;
 
     reset();
+    if (device->getMode() == SHUTTER)
+        device->shutterFeedback().begin(Yokis::ShutterFeedback::Toggle, millis());
     setupRFModule();
-    if (!radioReady) return false;
+    if (!radioReady) {
+        if (device->getMode() == SHUTTER)
+            device->setStatus(device->shutterFeedback().finish(false, millis()));
+        return false;
+    }
     if (device->getMode() == SHUTTER) {
         // On the captured shutter protocol, 0x53 after 0x35 stops movement.
         // Send one toggle, not a repeated press/release train that cancels it.
-        device->shutterFeedback().begin(Yokis::ShutterFeedback::Toggle, millis());
         bool ok = press();
         device->setStatus(device->shutterFeedback().finish(ok, millis()));
         return ok;
@@ -216,10 +225,16 @@ DeviceStatus E2bp::pollForStatus() {
     // Using 0 for 'begin' packet seems to do the trick
     uint8_t buf[PAYLOAD_LENGTH];
     reset();
+    if (!device || !device->isConfigured()) return UNDEFINED;
+    const bool checking = device->getMode() == SHUTTER &&
+        device->shutterFeedback().beginVerificationPoll(millis());
     setupRFModule();
-    if (!radioReady) return UNDEFINED;
-    getPayload(buf, PL_STATUS);
-    sendPayload(buf);
+    if (radioReady) {
+        getPayload(buf, PL_STATUS);
+        sendPayload(buf);
+    }
+    if (checking)
+        firstPayloadStatus = device->shutterFeedback().finishVerificationPoll(receivedResponse, millis());
     return firstPayloadStatus;
 }
 
@@ -233,7 +248,13 @@ DeviceMode E2bp::getDeviceModeFromRecvData() {
 bool E2bp::press() { return press(false); }
 
 bool E2bp::press(bool dim) {
-    if (!device || !device->isConfigured() || !radioReady) return false;
+    if (!device || !device->isConfigured()) return false;
+    const bool ownContext = device->getMode() == SHUTTER && !device->shutterFeedback().pending();
+    if (ownContext) device->shutterFeedback().begin(Yokis::ShutterFeedback::Toggle, millis());
+    if (!radioReady) {
+        if (ownContext) device->setStatus(device->shutterFeedback().finish(false, millis()));
+        return false;
+    }
     secondPayloadStatus = UNDEFINED;
     bool ret = true;
     if (IS_DEBUG_ENABLED) LOG.println("Button pressing");
@@ -246,6 +267,7 @@ bool E2bp::press(bool dim) {
         getPayload(buf, PL_BEGIN);
     ret = sendPayload(buf);
 
+    if (ownContext) device->setStatus(device->shutterFeedback().finish(ret, millis()));
     if (IS_DEBUG_ENABLED) LOG.println("Button pressed");
     return ret;
 }

@@ -120,6 +120,7 @@ class Device {
     bool isOnline();
     bool isOffline();
     void pollMePlease();
+    void clearPollingRequest() { hasToBePolledForStatus = false; }
     void pollingSuccess();
     uint8_t pollingFailed();
     uint8_t getFailedPollings();

@@ -25,4 +25,6 @@ assert detail['yokis_state'] == 'stopped'
 assert detail['state_source'] == 'command_stop_estimate'
 assert detail['state_estimated'] is True
 assert detail['raw_response'] == '00 00'
+assert detail['stop_check'] == 'stopped_observed'
+assert detail['stop_check_attempts'] == 1
 print('MQTT JSON valid; 6 Home Assistant template translations passed')

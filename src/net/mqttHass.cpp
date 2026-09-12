@@ -176,19 +176,21 @@ void MqttHass::notifyPower(const Device* device, DeviceStatus ds) {
     publish(buf, bufPayload, false);
     if (device->getMode() == SHUTTER) {
         const Yokis::ShutterFeedback& feedback = device->shutterFeedback();
-        char detail[320];
+        char detail[448];
         char raw[6] = "none";
         if (feedback.rawValid()) snprintf(raw, sizeof(raw), "%02X %02X", feedback.raw0(), feedback.raw1());
         const bool known = ds != UNDEFINED;
         snprintf(detail, sizeof(detail),
             "{\"yokis_state\":\"%s\",\"state_source\":\"%s\",\"state_estimated\":%s,"
             "\"last_command\":\"%s\",\"last_command_ms\":%lu,\"command_response\":%s,"
-            "\"raw_response\":\"%s\",\"raw_origin\":\"%s\"}",
+            "\"raw_response\":\"%s\",\"raw_origin\":\"%s\","
+            "\"stop_check\":\"%s\",\"stop_check_attempts\":%u}",
             known ? Device::getStatusAsString(ds) : "unknown",
             known ? feedback.sourceName() : "unknown",
             known && feedback.estimated() ? "true" : "false", feedback.commandName(),
             (unsigned long)feedback.commandAt(), feedback.commandResponse() ? "true" : "false",
-            raw, feedback.rawOrigin());
+            raw, feedback.rawOrigin(), feedback.verification().name(),
+            unsigned(feedback.verification().attempts()));
         snprintf(buf, sizeof(buf), "%s/tele/DETAIL", device->getName());
         publish(buf, detail, false);
     }

@@ -2,6 +2,7 @@
 #define YOKIS_SHUTTER_FEEDBACK_H
 
 #include "reliability.h"
+#include "RF/stopVerification.h"
 
 // Values kept identical to the legacy DeviceStatus enum.
 enum DeviceStatus { OFF = 0, ON, UNDEFINED, SHUTTER_OPENING, SHUTTER_CLOSING,
@@ -25,7 +26,7 @@ public:
 
     void begin(Action action, uint32_t now) {
         last_ = action; commandAt_ = now; commandResponse_ = false;
-        pending_ = true; rawValid_ = false;
+        pending_ = true; rawValid_ = false; verification_.cancel();
         // A new direction must clear a previous STOP even if polling misses
         // the whole movement. A new toggle has unknown direction.
         if (action != Pause) { stopLatched_ = false; pauseArmed_ = false; }
@@ -33,6 +34,7 @@ public:
 
     DeviceStatus finish(bool response, uint32_t now) {
         pending_ = false; commandResponse_ = response;
+        if (last_ == Pause) verification_.start(now);
         if (!response) {
             stopLatched_ = pauseArmed_ = false;
             uncertain_ = true; return set(UNDEFINED, Unknown);
@@ -58,6 +60,7 @@ public:
         // Direct-command replies can contain the old state. Preserve raw bytes
         // for diagnostics, but do not turn them into a post-command endpoint.
         if (pending_) return UNDEFINED;
+        expireVerification(now);
 
         // Preserve the existing rich-response masks. No speculative masking
         // of 0x40/0x80 or automatic device-generation detection is introduced.
@@ -66,25 +69,53 @@ public:
         if (b == 3 || (a <= 1 && b == 1)) {
             // Real motion, including motion initiated by another remote,
             // invalidates a previously latched stop.
-            if (stopLatched_) pauseArmed_ = false;
+            // Early motion after STOP may predate its execution. Keep the
+            // current verification armed until a resting observation or budget.
+            if (stopLatched_ && !verification_.pending()) pauseArmed_ = false;
             stopLatched_ = false; uncertain_ = false;
             return set((a & 1) ? SHUTTER_OPENING : SHUTTER_CLOSING, RadioStatus);
         }
         if (b == 2) {
             uncertain_ = false; stopLatched_ = true;
+            verification_.finish(StopVerification::StoppedObserved);
             return set(SHUTTER_STOPPED, RadioStatus);
         }
         if (a <= 1 && b == 0) {
             if (uncertain_) return set(UNDEFINED, Unknown);
             if (stopLatched_ || (pauseArmed_ && commandResponse_ &&
-                !elapsed(now, commandAt_, StopWindowMs))) {
+                (verification_.pending() || !elapsed(now, commandAt_, StopWindowMs)))) {
                 stopLatched_ = true;
+                verification_.finish(StopVerification::StoppedObserved);
                 return set(SHUTTER_STOPPED, StopEstimate);
             }
             pauseArmed_ = false;
             return set(a ? SHUTTER_OPENED : SHUTTER_CLOSED, SimpleEstimate);
         }
         return set(UNDEFINED, Unknown);
+    }
+
+    const StopVerification& verification() const { return verification_; }
+    bool expireVerification(uint32_t now) {
+        if (!verification_.expired(now)) return false;
+        verification_.finish(StopVerification::Inconclusive);
+        stopLatched_ = pauseArmed_ = false; uncertain_ = true;
+        set(UNDEFINED, Unknown);
+        return true;
+    }
+    bool beginVerificationPoll(uint32_t now) {
+        expireVerification(now);
+        return verification_.beginAttempt();
+    }
+    DeviceStatus finishVerificationPoll(bool response, uint32_t now) {
+        if (!response) { rawValid_ = false; set(UNDEFINED, Unknown); }
+        verification_.retry(now);
+        if (verification_.result() == StopVerification::Inconclusive) {
+            stopLatched_ = pauseArmed_ = false; uncertain_ = true;
+            // A received motion is useful evidence; no response is not.
+            if (!response || (state_ != SHUTTER_OPENING && state_ != SHUTTER_CLOSING))
+                set(UNDEFINED, Unknown);
+        }
+        return state_;
     }
 
     // A timeout/unknown response must not leave stale position metadata. It
@@ -124,8 +155,10 @@ private:
     DeviceStatus set(DeviceStatus s, Source source) { state_ = s; source_ = source; return s; }
     DeviceStatus rich(DeviceStatus s) {
         stopLatched_ = pauseArmed_ = uncertain_ = false;
+        verification_.finish(StopVerification::EndpointObserved);
         return set(s, RadioStatus);
     }
+    StopVerification verification_;
     DeviceStatus state_;
     Source source_;
     Action last_;

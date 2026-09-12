@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "RF/device.h"
+#include "postStopPolling.h"
 #include "RF/e2bp.h"
 #include "RF/pairing.h"
 #include "RF/copy.h"

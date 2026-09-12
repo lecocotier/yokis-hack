@@ -20,3 +20,8 @@ checks software control flow, not electrical timing, on-air reception or IRAM.
 `tests/build` is generated and excluded from version control. Firmware compilation
 is a separate GitHub Actions step for ESP8266 and Arduino Mega. Neither test suite
 operates an actual shutter or uploads a firmware.
+
+Post-STOP integration scenarios are in `poststop_cases.h`: due times, bounded
+retry, priority over periodic polls, queued MQTT STOPs, console STOP, independent
+destinations, RF initialization failures, special RF modes and rollover.
+The MQTT fixture consumes one packet per loop; it is not a live broker test.

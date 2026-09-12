@@ -29,7 +29,7 @@ jobs:
       - name: Validate MQTT JSON and Home Assistant value template
         run: python3 tests/check_mqtt_json.py
       - name: Compile ESP8266 and Arduino Mega (no upload)
-        run: pio run -e d1_mini -e megaatmega2560
+        run: pio run -e d1_mini -e d1_mini_ota -e megaatmega2560
       - name: Keep firmware build outputs
         if: success()
         uses: actions/upload-artifact@v4
@@ -37,5 +37,6 @@ jobs:
           name: firmware-builds-not-hardware-validated
           path: |
             .pio/build/d1_mini/firmware.bin
+            .pio/build/d1_mini_ota/firmware.bin
             .pio/build/megaatmega2560/firmware.hex
           retention-days: 14
