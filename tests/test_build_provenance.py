@@ -155,7 +155,9 @@ class BuildProvenanceTests(unittest.TestCase):
         receipt_path = provenance.write_receipt(
             self.root, builddir, identity, [binary], "native", metadata
         )
-        self.assertEqual(receipt_path, builddir / "build-receipt.json")
+        # Windows runners may expose TEMP through an 8.3 alias. The production
+        # API returns the canonical path; compare file identity after resolving.
+        self.assertEqual(receipt_path, (builddir / "build-receipt.json").resolve())
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         self.assertEqual(receipt["schema_version"], 1)
         self.assertEqual(receipt["environment"], "native")
