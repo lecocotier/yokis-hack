@@ -30,7 +30,7 @@ assert detail['stop_check_attempts'] == 1
 print('MQTT JSON valid; 6 Home Assistant template translations passed')
 
 # Validate all generated entity kinds, including maximum supported names.
-for path in [build / 'shutter-discovery.json', *sorted(build.glob('network-discovery-*.json'))]:
+for path in [build / 'shutter-discovery.json', build / 'bus-discovery.json', *sorted(build.glob('network-discovery-*.json'))]:
     item = json.loads(path.read_text())
     assert item['avty_mode'] == 'all'
     assert 'avty_t' not in item

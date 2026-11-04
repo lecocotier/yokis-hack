@@ -48,6 +48,8 @@ bool dimmerSet(const char*, const uint8_t);
 Device* getDeviceFromParams(const char*);
 
 bool storeConfigCallback(const char*);
+bool busConfig(const char*);
+bool statusAllCallback(const char*);
 bool clearConfig(const char*);
 bool displayConfig(const char*);
 bool restoreConfig(const char*);

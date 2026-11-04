@@ -29,6 +29,8 @@ class E2bp : public RFConfigurator {
     volatile bool loopContinue;
     bool radioReady;
     bool receivedResponse;
+    // Cached foreground decisions: ISR paths must never call flash getters.
+    volatile bool busTransaction_ = false, busTransmitted_ = false, txArmed_ = false;
     uint16_t txCycles;
     DeviceStatus firstPayloadStatus, secondPayloadStatus;
     uint8_t answerBuf[2];

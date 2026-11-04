@@ -2,7 +2,7 @@ name: Verify reliability fixes
 
 on:
   push:
-    branches: ["master", "fix/**"]
+    branches: ["master", "fix/**", "feat/**"]
   pull_request:
     branches: ["master"]
   workflow_dispatch:

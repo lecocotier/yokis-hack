@@ -41,7 +41,7 @@ def main() -> int:
         flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"]
         env["ASAN_OPTIONS"] = "detect_leaks=1"
     sources = ["tests/test_regression.cpp", "tests/build/callbacks.cpp", "src/RF/device.cpp", "src/RF/e2bp.cpp",
-               "src/RF/configurator.cpp", "src/utils.cpp", "src/postStopPolling.cpp", "src/RF/pairing.cpp",
+               "src/RF/configurator.cpp", "src/RF/bus.cpp", "src/statusRefresh.cpp", "src/utils.cpp", "src/postStopPolling.cpp", "src/RF/pairing.cpp",
                "src/RF/copy.cpp", "src/RF/scanner.cpp", "src/RF/irqManager.cpp", "src/commands/callbacks.cpp"]
     sources += sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "src/serial").glob("*.cpp"))
     sources += ["src/net/wifi.cpp", "src/net/webserver.cpp", "src/net/diagnostics.cpp", "src/net/discoveryCleanup.cpp", "src/net/mqtt.cpp", "src/net/mqttHass.cpp",

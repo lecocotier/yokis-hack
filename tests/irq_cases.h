@@ -3,11 +3,11 @@ void testIrqDispatch() {
     testRadio=RadioFixture();IrqManager::irqType=E2BP;testRadio.irqStatus=0x70;
     IrqManager::processIRQ();
     CHECK(testRadio.irqStatus==0);
-    CHECK((testRadio.irqEvents==std::vector<std::string>{"status","reg:0:15","ce:1","reg:7:112"}));
-    CHECK(testRadio.config==15);
+    CHECK((testRadio.irqEvents==std::vector<std::string>{"status"}));
+    CHECK(testRadio.config==0); // No transaction armed: stale IRQ must not restart RF.
     testRadio.irqEvents.clear();testRadio.irqStatus=0x20;testRadio.irqFailsOnce=true;testIrqPin()=LOW;
     IrqManager::servicePending();CHECK(testIrqPin()==LOW);CHECK(testRadio.irqStatus==0x20);
-    IrqManager::servicePending();CHECK(testIrqPin()==HIGH);CHECK(testRadio.irqStatus==0);CHECK(testRadio.irqEvents.size()==5);
+    IrqManager::servicePending();CHECK(testIrqPin()==HIGH);CHECK(testRadio.irqStatus==0);CHECK(testRadio.irqEvents.size()==2);
     Pairing* saved=g_pairingRF;g_pairingRF=nullptr;IrqManager::irqType=PAIRING;
     IrqManager::processIRQ();g_pairingRF=saved; // Startup/uninitialized target.
     testRadio=RadioFixture();unsigned packets=0;

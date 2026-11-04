@@ -3,6 +3,7 @@
 #include "globals.h"
 #include "utils.h"
 #include "reliability.h"
+#include "RF/bus.h"
 
 // E2bp implements the captured Yokis command exchange over the low-level NRF
 // driver. Payload bytes and TX/RX timing are installation-specific evidence;
@@ -15,6 +16,7 @@ E2bp::~E2bp() { cancelHold(false); }
 void E2bp::reset() {
     firstPayloadStatus = secondPayloadStatus = UNDEFINED;
     loopContinue = true; receivedResponse = false; txCycles = 0;
+    txArmed_ = false; busTransmitted_ = false; busTransaction_ = false;
     memset(answerBuf, 0, sizeof(answerBuf));
 }
 void E2bp::setDevice(Device* d) {
@@ -46,9 +48,17 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
 
     if (!device || !device->isConfigured()) return false;
     reset();
+    const bool bus = device->getMode() == SHUTTER_BUS;
+    if (bus) {
+#ifdef ESP8266
+        if (!Yokis::busEntry(*device,g_devices,MQTT_MAX_NUM_OF_YOKIS_DEVICES)) return false;
+#else
+        return false; // No saved ESP8266 member list on the standalone AVR tool.
+#endif
+    }
     // Shutters have distinct directional and STOP payloads. Their command
     // response may predate movement, so ShutterFeedback owns the estimate.
-    if(device->getMode() == SHUTTER ) {
+    if(Yokis::isCoverMode(device->getMode())) {
         if (ds == SHUTTER_STOPPED) {
             getPayload(buf, PL_SHUTTERPAUSE);
         } else if (ds == SHUTTER_OPENING) {
@@ -74,7 +84,16 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
             device->setStatus(device->shutterFeedback().finish(false, millis()));
         return false;
     }
-    do { ret = sendPayload(buf); } while (!ret && device->getMode() != NO_RCPT && !Yokis::elapsed(millis(), start, 1000));
+    do { ret = sendPayload(buf); } while (!ret && !bus && device->getMode() != NO_RCPT && !Yokis::elapsed(millis(), start, 1000));
+
+#ifdef ESP8266
+    if (bus) {
+        Yokis::applyBusCommand(*device, ds==SHUTTER_OPENING ? Yokis::ShutterFeedback::Up :
+            ds==SHUTTER_CLOSING ? Yokis::ShutterFeedback::Down : Yokis::ShutterFeedback::Pause,
+            ret,g_devices,MQTT_MAX_NUM_OF_YOKIS_DEVICES,millis());
+        return ret;
+    }
+#endif
 
     if (device->getMode() == SHUTTER) {
         device->setStatus(device->shutterFeedback().finish(ret, millis()));
@@ -93,7 +112,7 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
 
 bool E2bp::on() { 
     if (!device) return false;
-    if(device->getMode() == SHUTTER ) {
+    if(Yokis::isCoverMode(device->getMode())) {
         return setDeviceStatus(SHUTTER_OPENING);
     } else {
         return setDeviceStatus(ON); 
@@ -102,7 +121,7 @@ bool E2bp::on() {
 
 bool E2bp::off() { 
     if (!device) return false;
-    if(device->getMode() == SHUTTER ) {
+    if(Yokis::isCoverMode(device->getMode())) {
         return setDeviceStatus(SHUTTER_CLOSING);
     } else {
         return setDeviceStatus(OFF); 
@@ -110,13 +129,14 @@ bool E2bp::off() {
 }
 
 bool E2bp::pauseShutter() {
-    return device && device->getMode() == SHUTTER && setDeviceStatus(SHUTTER_STOPPED);
+    return device && Yokis::isCoverMode(device->getMode()) && setDeviceStatus(SHUTTER_STOPPED);
 }
 
 // Emulate a remote-button sequence. Direct ON/OFF commands require fewer
 // exchanges; a shutter toggle deliberately omits the cancelling release.
 bool E2bp::toggle() {
     if (!device || !device->isConfigured()) return false;
+    if (device->getMode() == SHUTTER_BUS) return false; // Directional bus orders only.
     const uint32_t start = millis();
     bool retPress = false, retRelease = false;
 
@@ -224,6 +244,7 @@ DeviceStatus E2bp::pollForStatus() {
     uint8_t buf[PAYLOAD_LENGTH];
     reset();
     if (!device || !device->isConfigured()) return UNDEFINED;
+    if (device->getMode() == SHUTTER_BUS) return device->getStatus(); // Cached aggregate, never query one entry as all members.
     const bool checking = device->getMode() == SHUTTER &&
         device->shutterFeedback().beginVerificationPoll(millis());
     setupRFModule();
@@ -247,6 +268,7 @@ bool E2bp::press() { return press(false); }
 
 bool E2bp::press(bool dim) {
     if (!device || !device->isConfigured()) return false;
+    if (device->getMode() == SHUTTER_BUS) return false;
     const bool ownContext = device->getMode() == SHUTTER && !device->shutterFeedback().pending();
     if (ownContext) device->shutterFeedback().begin(Yokis::ShutterFeedback::Toggle, millis());
     if (!radioReady) {
@@ -272,6 +294,7 @@ bool E2bp::press(bool dim) {
 
 bool E2bp::release() {
     if (!device || !device->isConfigured() || !radioReady) return false;
+    if (device->getMode() == SHUTTER_BUS) return false;
     bool ret = true;
     if (IS_DEBUG_ENABLED) LOG.println("Button releasing");
     uint8_t buf[PAYLOAD_LENGTH];
@@ -343,14 +366,13 @@ Device* E2bp::serviceHold() {
     return target;
 }
 
-// Individual shutter orders retain 0x06 and a zero fourth byte. Upstream also
-// supports bus-wide commands (0x16) and different address fields; those are
-// intentionally not inferred from an individual device's configuration here.
+// Existing individual packets stay byte-compatible. Bus mode is explicitly
+// configured with an entry route; only its two upstream command flags differ.
 uint8_t* E2bp::getPayload(uint8_t* buf, PayloadType type) {
     buf[0] = 0x00;
-    buf[1] = device->getMode() == SHUTTER ? 0x06 : 0x04;
+    buf[1] = device->getMode() == SHUTTER_BUS ? 0x16 : device->getMode() == SHUTTER ? 0x06 : 0x04;
     buf[2] = 0x00;
-    buf[3] = 0x00;
+    buf[3] = device->getMode() == SHUTTER_BUS ? 0x20 : 0x00;
     buf[4] = 0x00;
     buf[5] = 0x00;
     buf[6] = random(0, 0xff);
@@ -449,15 +471,28 @@ bool E2bp::runMainLoop() {
     // while not interrupted by RX, timeout or by device mode
     while (loopContinue && !Yokis::elapsed(millis(), start, MAIN_LOOP_TIMEOUT_MILLIS)) {
         IrqManager::servicePending();
-        if (available()) break; // handle data even if an IRQ edge was missed
+        if (txArmed_ && !busTransaction_ && available()) break;
         if (txCycles < 65535) ++txCycles;
         write_register(NRF_CONFIG, 0b00001110);  // PTX
+        txArmed_ = true;
         ce(HIGH);
         yield();
         delayMicroseconds(15);
         ce(LOW);
         yield();
         delayMicroseconds(685);
+
+        if (busTransaction_) {
+            // EN_AA is zero: TX_DS proves emission only. Send the group order
+            // once, then wait for that event; automatic repeats could restart
+            // a member stopped individually immediately after this operation.
+            while (!busTransmitted_ && !Yokis::elapsed(millis(), start, MAIN_LOOP_TIMEOUT_MILLIS)) {
+                IrqManager::servicePending();
+                if (get_status() & _BV(TX_DS)) busTransmitted_ = true;
+                yield(); delayMicroseconds(20);
+            }
+            break;
+        }
 
         write_register(NRF_CONFIG, 0b00001111);  // PRX
         ce(HIGH);
@@ -473,7 +508,7 @@ bool E2bp::runMainLoop() {
     }
 
     // We got here right after being interrupted
-    if (available()) {
+    if (!busTransaction_ && txArmed_ && available()) {
         setPayloadSize(sizeof(answerBuf)); // RX is two bytes, TX is nine
         read(answerBuf, sizeof(answerBuf));
         receivedResponse = true;
@@ -534,12 +569,17 @@ bool E2bp::runMainLoop() {
     ce(LOW);
     flush_tx(); // stop reuse before a different operation takes the radio
     write_register(NRF_STATUS, 0b01110000);
-    return receivedResponse; // an interrupt alone is not proof of a payload
+    txArmed_ = false;
+    const bool result = receivedResponse || busTransmitted_;
+    busTransaction_ = false;
+    return result; // Bus emission and individual application response differ.
 }
 
 void E2bp::setupPayload(const uint8_t* payload) {
     // Prepare everything to send continuously the given payload
     ce(LOW);
+    txArmed_ = false; busTransmitted_ = false;
+    busTransaction_ = device && device->getMode() == SHUTTER_BUS;
     flush_rx(); // do not accept a stale response from the previous transaction
     write_register(NRF_STATUS, 0b01110000);
     loopContinue = true;
@@ -559,6 +599,13 @@ void E2bp::stopMainLoop() {
 IRAM_ATTR
 #endif
 void E2bp::interruptTxOk() {
+    if (!txArmed_) return; // Ignore a previous operation's IRQ before this TX.
+    if (busTransaction_) {
+        busTransmitted_ = true;
+        irqCe(LOW);
+        stopMainLoop();
+        return;
+    }
     // The immediate TX->RX switch is retained from the captured protocol.
     // Only the dedicated IRAM transport may be called from this path.
     if (!irqWriteRegister(NRF_CONFIG, 0b00001111)) { stopMainLoop(); return; } // PRX
@@ -571,7 +618,7 @@ IRAM_ATTR
 #endif
 void E2bp::interruptRxReady() {
     // Defer FIFO reads and interpretation to runMainLoop().
-    stopMainLoop();
+    if (txArmed_ && !busTransaction_) stopMainLoop();
 }
 
 #if defined(ESP8266)

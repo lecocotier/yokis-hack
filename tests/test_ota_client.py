@@ -154,6 +154,15 @@ class OtaClientTests(unittest.TestCase):
         self.assertEqual(args[6], 100)
         self.assertTrue(self.sdk.PROGRESS)
 
+    def test_private_section_keeps_auth_out_of_platformio_environment_dump(self):
+        self.config.write_text(
+            "[env:d1_mini_ota]\nupload_port = 192.0.2.5\n"
+            "[ota_private:d1_mini_ota]\nupload_flags = --auth=" + FAKE_KEY +
+            " --host_port=3232\n", encoding="utf-8")
+        settings = ota.load_settings(str(self.config), "d1_mini_ota")
+        self.assertEqual(settings.password, FAKE_KEY)
+        self.assertEqual(settings.host_port, 3232)
+
     def test_ini_auth_wins_during_local_header_rotation(self):
         header = Path(self.temporary.name) / "local_secrets.h"
         header.write_text('#define YOKIS_OTA_PASSWORD "future-new-key"\n', encoding="utf-8")

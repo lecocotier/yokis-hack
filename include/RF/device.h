@@ -27,8 +27,13 @@ enum DeviceMode {
     DIMMER,   // Reception: 01 00 -> command not ok, 01 01 -> command ok (second
               // payload) - first payload responds with device status
     NO_RCPT,  // No reception, send blindly begin and end packets 30 times
-    SHUTTER   // Shutter style devices (MVR500)
+    SHUTTER,   // Shutter style devices (MVR500)
+    SHUTTER_BUS // Appended: persisted values 0..3 remain unchanged.
 };
+
+namespace Yokis {
+inline bool isCoverMode(DeviceMode mode) { return mode == SHUTTER || mode == SHUTTER_BUS; }
+}
 
 enum DeviceAvailability { OFFLINE = 0, ONLINE };
 

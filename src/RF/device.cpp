@@ -95,6 +95,8 @@ const char* Device::getModeAsString(DeviceMode mode) {
             return "ON_OFF";
         case SHUTTER:
            return "SHUTTER";
+        case SHUTTER_BUS:
+           return "SHUTTER_BUS";
         case NO_RCPT:
             return "NO_RCP";
     }
@@ -141,7 +143,7 @@ void Device::acknowledgeCommand(Yokis::Command cmd, uint32_t now) {
     commandHistory.acknowledged(cmd, now);
 }
 
-void Device::setMode(DeviceMode mode) { if (mode >= ON_OFF && mode <= SHUTTER) this->mode = mode; }
+void Device::setMode(DeviceMode mode) { if (mode >= ON_OFF && mode <= SHUTTER_BUS) this->mode = mode; }
 
 void Device::setMode(const char* mode) {
     if (mode == NULL || strlen(mode) == 0) {
@@ -150,6 +152,8 @@ void Device::setMode(const char* mode) {
         this->setMode(DIMMER);
     } else if (strcmp("SHUTTER", mode) == 0) {
         this->setMode(SHUTTER);
+    } else if (strcmp("SHUTTER_BUS", mode) == 0) {
+        this->setMode(SHUTTER_BUS);
     } else if (strcmp("NO_RCPT", mode) == 0) {
         this->setMode(NO_RCPT);
     } else {
@@ -306,7 +310,7 @@ bool Device::parseConfigLine(const char* line, Device& result) {
             !Yokis::unsignedNumber(fields[i], i == 5 ? 0xffffffUL : 65535,
                                    values[i], i == 7 ? 10 : 16)) return false;
     }
-    if (values[2] > 125 || values[7] > SHUTTER) return false;
+    if (values[2] > 125 || values[7] > SHUTTER_BUS) return false;
     Device d(fields[0]);
     d.setHardwareAddress(fields[1]); d.setChannel(uint8_t(values[2]));
     uint8_t ver[] = {uint8_t(values[5] >> 16), uint8_t(values[5] >> 8), uint8_t(values[5])};
@@ -349,8 +353,8 @@ bool Device::writeConfig(const Device* replacement, const char* removedName, boo
         // Own the obsolete identity durably BEFORE committing its removal.
         // A failed config rename leaves an intent which is reconciled against
         // the still-active identity before any retained message is cleared.
-        if ((removed || (replaced && (d.getMode() == SHUTTER) != (replacement->getMode() == SHUTTER))) &&
-            !Yokis::queueDiscoveryCleanup(d.getName(), d.getMode() == SHUTTER)) {
+        if ((removed || (replaced && Yokis::isCoverMode(d.getMode()) != Yokis::isCoverMode(replacement->getMode()))) &&
+            !Yokis::queueDiscoveryCleanup(d.getName(), Yokis::isCoverMode(d.getMode()))) {
             ok = false; break;
         }
 #endif

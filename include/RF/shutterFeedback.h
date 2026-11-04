@@ -18,7 +18,8 @@ public:
     static const uint32_t StopWindowMs = 5000;
     enum Action : uint8_t { NoAction, Up, Down, Pause, Toggle };
     enum Source : uint8_t { Unknown, RadioStatus, SimpleEstimate,
-                            CommandEstimate, StopEstimate };
+                            CommandEstimate, StopEstimate, BusCommandEstimate,
+                            BusMembersEstimate };
 
     ShutterFeedback() : state_(UNDEFINED), source_(Unknown), last_(NoAction),
         commandAt_(0), commandResponse_(false), pending_(false),
@@ -122,11 +123,30 @@ public:
     // A timeout/unknown response must not leave stale position metadata. It
     // does not erase the last attempted command, useful for troubleshooting.
     void unknown() { state_ = UNDEFINED; source_ = Unknown; }
+    // A bus emission is not an individual reply. Each member starts its own
+    // context; a later individual STOP can replace it without touching peers.
+    DeviceStatus fromBus(Action action, bool transmitted, uint32_t now) {
+        begin(action, now);
+        pending_ = false; commandResponse_ = false;
+        stopLatched_ = pauseArmed_ = false;
+        uncertain_ = !transmitted;
+        if (!transmitted) return set(UNDEFINED, Unknown);
+        // Resting legacy bytes after a bus STOP still cannot locate the shutter.
+        // Keep the stop estimate until observed motion or a rich endpoint.
+        stopLatched_ = action == Pause;
+        return set(action == Up ? SHUTTER_OPENING : action == Down ? SHUTTER_CLOSING :
+                   action == Pause ? SHUTTER_STOPPED : UNDEFINED, BusCommandEstimate);
+    }
+    void fromMembers(DeviceStatus state) {
+        rawValid_ = false; pending_ = false; commandResponse_ = false;
+        set(state, state == UNDEFINED ? Unknown : BusMembersEstimate);
+    }
     DeviceStatus state() const { return state_; }
     Source source() const { return source_; }
     bool estimated() const {
         return source_ == SimpleEstimate || source_ == CommandEstimate ||
-               source_ == StopEstimate;
+               source_ == StopEstimate || source_ == BusCommandEstimate ||
+               source_ == BusMembersEstimate;
     }
     bool pending() const { return pending_; }
     bool commandResponse() const { return commandResponse_; }
@@ -149,6 +169,8 @@ public:
             case SimpleEstimate: return "simple_rf_estimate";
             case CommandEstimate: return "command_estimate";
             case StopEstimate: return "command_stop_estimate";
+            case BusCommandEstimate: return "bus_command_estimate";
+            case BusMembersEstimate: return "bus_members_estimate";
             default: return "unknown";
         }
     }

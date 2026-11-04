@@ -49,6 +49,8 @@ void authorizeAdmin(AsyncWebServerRequest& r){r.authUser=YOKIS_HTTP_USER;r.authP
 #include "discovery_cleanup_cases.h"
 #include "feature_cases.h"
 #include "cleanup_integration_cases.h"
+#include "bus_cases.h"
+#include "status_refresh_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -275,6 +277,8 @@ int main(){
  testDiagnosticSerialization();
     testDiscoveryCleanup();
  testCleanupIntegration();
+ testBusMode();
+ testStatusRefresh();
  testIrqDispatch();
  Serial.out.clear();CHECK(versionCallback("version"));CHECK(Serial.out.find("Build: native-test")!=std::string::npos);
  CHECK(!versionCallback("version extra"));

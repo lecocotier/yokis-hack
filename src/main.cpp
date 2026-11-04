@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include "reliability.h"
 #include "postStopPolling.h"
+#include "RF/bus.h"
+#include "statusRefresh.h"
+#include "statusLed.h"
 
 #include "RF/copy.h"
 #include "RF/e2bp.h"
@@ -176,10 +179,12 @@ void loop() {
         !postStopChecksPending()) g_mqtt->serviceRefresh(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     // Drain already received commands before ANY automatic status query.
     // No recursive MQTT calls from the radio; special RF modes retain ownership.
-    if (FLAG_IS_ENABLED(FLAG_POLLING) && IrqManager::irqType == E2BP &&
+    if (IrqManager::irqType == E2BP &&
         !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !consoleInputPending()) {
         automaticRadioWork = servicePostStopPolling();
-        if (!automaticRadioWork && !postStopChecksPending() && !g_bp->holdActive() &&
+        if (!automaticRadioWork && !postStopChecksPending() && !g_bp->holdActive())
+            automaticRadioWork = Yokis::serviceStatusRefresh();
+        if (FLAG_IS_ENABLED(FLAG_POLLING) && !automaticRadioWork && !postStopChecksPending() && !g_bp->holdActive() &&
             g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
         // One poll per main-loop iteration: queued commands get serviced
         // between devices instead of waiting through up to 64 timeouts.
@@ -198,6 +203,16 @@ void loop() {
 #endif // ESP8266
     if (IrqManager::irqType == SCANNER) g_scanner->service();
     g_serial->readFromSerial();
+#ifdef ESP8266
+    bool mqttConnected = false, mqttConfigured = false;
+#ifdef MQTT_ENABLED
+    Yokis::publishBusChanges();
+    mqttConnected = g_mqtt && g_mqtt->connected();
+    mqttConfigured = g_mqtt && !g_mqtt->isEmpty();
+#endif
+    digitalWrite(STATUS_LED, Yokis::statusLedOn(millis(),WiFi.status()==WL_CONNECTED,
+        mqttConnected,mqttConfigured) ? LOW : HIGH);
+#endif
     bool canServiceHold = !automaticRadioWork && IrqManager::irqType == E2BP && !consoleInputPending();
 #if defined(ESP8266) && defined(MQTT_ENABLED)
     canServiceHold = canServiceHold && !g_mqtt->handledInput() &&
@@ -220,7 +235,7 @@ void loop() {
 
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 void pollForStatus(Device* d) {
-    if (!d || d->getMode() == NO_RCPT) return;
+    if (!d || d->getMode() == NO_RCPT || d->getMode() == SHUTTER_BUS) return;
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
     const bool checking = d->getMode() == SHUTTER && d->shutterFeedback().verification().pending();
@@ -259,9 +274,11 @@ void pollForStatus(Device* d) {
     } else {
         if (d->pollingFailed() >= DEVICE_MAX_FAILED_POLLING_BEFORE_OFFLINE) {
             // Device is unreachable
+            if (!d->isOffline()) {
             LOG.print("Device ");
             LOG.print(d->getName());
             LOG.println(" is offline");
+            }
             d->offline();
             g_mqtt->notifyOffline(d);
         } else if (IS_RF_TRACE_ENABLED) {
@@ -273,6 +290,7 @@ void pollForStatus(Device* d) {
             LOG.println(DEVICE_MAX_FAILED_POLLING_BEFORE_OFFLINE, DEC);
         }
     }
+    Yokis::publishBusChanges();
 }
 #endif
 
@@ -287,10 +305,10 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     }
     Device* d = Device::getFromList(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, request.device);
     if (!d || !d->isConfigured() || (request.brightness && d->getMode() != DIMMER) ||
-        (request.command == Yokis::Stop && d->getMode() != SHUTTER)) {
+        (request.command == Yokis::Stop && !Yokis::isCoverMode(d->getMode()))) {
         LOG.println("MQTT command rejected: unknown device or unsupported command"); return;
     }
-    if (d->getMode() != SHUTTER && d->isDuplicateCommand(request.command, millis())) {
+    if (!Yokis::isCoverMode(d->getMode()) && d->isDuplicateCommand(request.command, millis())) {
         LOG.println("MQTT duplicate of the same acknowledged command ignored"); return;
     }
     IrqManager::irqType = E2BP;
@@ -316,6 +334,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     } else {
         d->setStatus(UNDEFINED); // never publish the intended motion as proven
     }
+    Yokis::publishBusChanges(d);
     if (d->getMode() == DIMMER) {
         if (ok) g_mqtt->notifyBrightness(d);
         else g_mqtt->notifyPower(d, UNDEFINED);

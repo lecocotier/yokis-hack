@@ -39,7 +39,7 @@ Les volets restent commandés en mode optimiste dans Home Assistant. La traducti
 
 ## Pourquoi ces octets et ces temporisations radio
 
-Les commandes individuelles de volet conservent `B9` pour ouvrir, `FA` pour fermer et `1A` pour arrêter. Le deuxième octet est `06`, et le quatrième reste `00`. L'amont dispose aussi d'un mode bus `16` et de champs d'adresse différents: il ne faut pas les substituer au mode individuel sans vérifier leur effet sur l'installation.
+Les commandes individuelles de volet conservent `B9` pour ouvrir, `FA` pour fermer et `1A` pour arrêter. Le deuxième octet est `06`, et le quatrième reste `00`. Le nouveau mode bus explicite utilise `16` et `20` sur la route d'un volet d'entrée enregistré ; il ne remplace jamais une trame individuelle. Voir [la configuration et les limites du bus](upstream-integration-2026-11-04.md).
 
 La bascule TX/RX, les écritures directes de registres et les délais dans `E2bp` proviennent des captures historiques. Remplacer une écriture par une méthode de plus haut niveau peut ajouter des lectures SPI, changer les interruptions effacées ou insérer un délai. Une refonte exige des mesures, pas uniquement une compilation.
 
@@ -61,7 +61,7 @@ un appairage valide.
 2. Expirer les contrôles STOP devenus trop anciens, sans transaction RF.
 3. Consommer un paquet MQTT.
 4. Autoriser une étape de découverte/republication seulement si aucune entrée ni vérification STOP prioritaire n'attend.
-5. Si les conditions le permettent, effectuer un contrôle post-STOP, sinon au plus un polling ordinaire.
+5. Si les conditions le permettent, effectuer un contrôle post-STOP, sinon une étape de `statusAll`, sinon au plus un polling ordinaire.
 6. Servir le scanner et lire une quantité bornée de console.
 7. Si aucune commande ou vérification STOP ne l'empêche, servir une étape de
    maintien de variateur, puis rendre la main au cœur ESP8266.

@@ -15,6 +15,11 @@ void testTraceIntegration() {
         Serial.out.clear();
         pollForStatus(g_devices[0]);
         CHECK((Serial.out.find("Failed to check device") != std::string::npos) == (level >= 1));
+        Serial.out.clear();
+        for(unsigned i=0;i<3;++i) pollForStatus(g_devices[0]);
+        const auto transition = Serial.out.find(" is offline");
+        CHECK(transition != std::string::npos);
+        CHECK(Serial.out.find(" is offline",transition+1) == std::string::npos);
     }
     g_ConfigFlags = savedFlags;
     freshDevice();

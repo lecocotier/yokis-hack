@@ -70,7 +70,7 @@ void MqttHass::serviceRefresh(Device* const* devices, size_t count) {
             Device* d = devices[discoveryIndex_];
             if (!publishDevice(d) || !subscribeDevice(d)) return;
             ++discoveryIndex_;
-            if (d->getMode() != NO_RCPT) d->pollMePlease();
+            if (d->getMode() != NO_RCPT && d->getMode() != SHUTTER_BUS) d->pollMePlease();
         }
         while (discoveryIndex_ < count && !devices[discoveryIndex_]) ++discoveryIndex_;
         if (discoveryIndex_ == count) {
@@ -107,7 +107,7 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
     char availability[256];
     if (!availabilityJson(availability, sizeof(availability))) return NULL;
     const char* name = device->getName();
-    const bool shutter = device->getMode() == SHUTTER;
+    const bool shutter = Yokis::isCoverMode(device->getMode());
     const bool dimmer = device->getMode() == DIMMER;
     // Ambiguous shutter replies cannot supply a reliable intermediate position.
     // Optimistic control keeps the buttons usable; mapping stopped to None
@@ -130,7 +130,7 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
 }
 
 char* MqttHass::newPublishTopic(const Device* device, char* buf) {
-    if (device->getMode() == SHUTTER) { 
+    if (Yokis::isCoverMode(device->getMode())) {
         snprintf(buf, 96, "%s/cover/%s/config", HASS_PREFIX, device->getName());
     } else {
         snprintf(buf, 96, "%s/light/%s/config", HASS_PREFIX, device->getName());
@@ -162,7 +162,7 @@ bool MqttHass::publishDevice(const Device* device) {
     // Clear only that declaration; STATE/DETAIL/LWT belong to this live name.
     char obsolete[128];
     snprintf(obsolete, sizeof(obsolete), "%s/%s/%s/config", HASS_PREFIX,
-        device->getMode() == SHUTTER ? "light" : "cover", device->getName());
+        Yokis::isCoverMode(device->getMode()) ? "light" : "cover", device->getName());
     if (!publish(obsolete, "", true)) return false;
     ret = this->publish(topic, payload, true);
     if (ret) ret = notifyAvailability(device, device->getAvailability() == OFFLINE ? "Offline" : "Online");
@@ -198,9 +198,9 @@ bool MqttHass::notifyPower(const Device* device, DeviceStatus ds, bool replayed)
     char bufPayload[64];
 
     snprintf(buf, 96, "%s/tele/STATE", device->getName());
-    sprintf(bufPayload, "{\"POWER\":\"%s\"}", (device->getMode() == SHUTTER && ds == UNDEFINED) ? "None" : Device::getStatusAsString(ds));
+    sprintf(bufPayload, "{\"POWER\":\"%s\"}", (Yokis::isCoverMode(device->getMode()) && ds == UNDEFINED) ? "None" : Device::getStatusAsString(ds));
     bool ok = publish(buf, bufPayload, true);
-    if (device->getMode() == SHUTTER) {
+    if (Yokis::isCoverMode(device->getMode())) {
         const Yokis::ShutterFeedback& feedback = device->shutterFeedback();
         char detail[512];
         char raw[6] = "none";
@@ -253,6 +253,6 @@ bool MqttHass::subscribeDevice(const Device* device) {
     return ok;
 }
 bool MqttHass::removeDiscovery(const Device* device) {
-    return device && Yokis::queueDiscoveryCleanup(device->getName(), device->getMode() == SHUTTER);
+    return device && Yokis::queueDiscoveryCleanup(device->getName(), Yokis::isCoverMode(device->getMode()));
 }
 #endif

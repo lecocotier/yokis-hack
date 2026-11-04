@@ -6,6 +6,8 @@ For this installation's fork, see the [architecture and design choices](doc/arch
 and the [4 November 2026 source/upstream audit](doc/audit-2026-11-04.md).
 The [remaining fixes](doc/remaining-fixes-2026-11-04.md) distinguish reproduced
 defects from upstream reports and known hardware limits.
+See the [2026 upstream integration and bus guide](doc/upstream-integration-2026-11-04.md)
+for the debug levels, protected dashboard and bus configuration.
 
 Local deployment settings belong in `platformio.local.ini` (copy
 `platformio.local.example.ini`), which is excluded from Git. Never put real
@@ -170,7 +172,7 @@ From serial, one can use the following commands:
 | command            | paramters                | help                                                                                                |
 |--------------------|--------------------------|-----------------------------------------------------------------------------------------------------|
 | `help`             |                          | Display all commands available                                                                      |
-| `debug`            |                          | Toggle debug mode                                                                                   |
+| `debug`            | `[0|1|2]`                | 0: quiet polling; 1: RF/poll results; 2: detailed debug. No argument cycles levels.                    |
 | `raw`              |                          | Toggle raw output (output from pairing command will not be formatted) - deprecated                  |
 | `poll`             |                          | Toggle the option to poll all the configured devices for their status and publish them over MQTT    |
 | `config`           |                          | Display configuration flags state                                                                   |
@@ -186,6 +188,8 @@ From serial, one can use the following commands:
 | `pressFor`         | `device_name duration`   | Emulate a button press and hold for a duration (dimmers only)                                       |
 | `release`          | `[device_name]`          | Emulate a button release - this is mostly used for debugging                                        |
 | `status`           | `[device_name]`          | Get device status                                                                                   |
+| `statusAll`        |                          | Queue status queries, one per loop; commands and STOP keep priority (ESP8266).                        |
+| `busConfig`        | `group entry_shutter`    | Save an explicit bus route; all configured individual shutters are members (ESP8266).                |
 | `dimmem`           | `[device_name]`          | Only for dimmers - Set to dimmer memory (1 button press)                                            |
 | `dimmin`           | `[device_name]`          | Only for dimmers - Set the dimmer to minimum light (4 button presses)                               |
 | `dimmax`           | `[device_name]`          | Only for dimmers - Set the dimmer to 100% light (2 button presses)                                  |
@@ -197,7 +201,7 @@ From serial, one can use the following commands:
 | `reload`           |                          | Reload config from LittleFS to memory                                                               |
 | `dConfigFS`        |                          | display config previously stored in LittleFS                                                        |
 | `dRestore`         | `config_line`            | restore a previously saved raw config line                                                          |
-| `wifiConfig`       | `ssid password`          | Configure wifi with parameters: ssid psk (does not work for psk containing spaces)                  |
+| `wifiConfig`       | `ssid [password]`        | Configure WiFi; quote arguments containing spaces.                                                  |
 | `wifiDiag`         |                          | Display wifi configuration debug info                                                               |
 | `wifiReset`        |                          | Reset wifi configuration and setup AP mode                                                          |
 | `restart`          |                          | Restart the ESP8266 board                                                                           |

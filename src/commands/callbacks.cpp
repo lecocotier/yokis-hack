@@ -3,6 +3,8 @@
 #include "globals.h"
 #include "reliability.h"
 #include "buildIdentity.h"
+#include "RF/bus.h"
+#include "statusRefresh.h"
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 #include "net/discoveryCleanup.h"
 #endif
@@ -80,6 +82,10 @@ void registerAllCallbacks() {
         dimmerNilCallback));
 
 #ifdef ESP8266
+    g_serial->registerCallback(new GenericCallback(
+        "busConfig", "Configure group: busConfig <name> <saved entry shutter>; all individual shutters are members", busConfig));
+    g_serial->registerCallback(new GenericCallback(
+        "statusAll", "Queue one status query per loop; skip bus groups and keep STOP priority", statusAllCallback));
     g_serial->registerCallback(new GenericCallback(
         "save", "Save current device configuration to LittleFS",
         storeConfigCallback));
@@ -197,6 +203,7 @@ bool changeDeviceState(const char* params, bool (E2bp::*func)(void)) {
     if (!ret) d->setStatus(UNDEFINED);
 #if defined(ESP8266) && defined(MQTT_ENABLED)
     if (g_mqtt) {
+        Yokis::publishBusChanges(d);
         if (d->getMode() == DIMMER) {
             if (ret) g_mqtt->notifyBrightness(d);
             else g_mqtt->notifyPower(d, UNDEFINED);
@@ -346,6 +353,26 @@ bool storeConfigCallback(const char* params) {
     LOG.println("Saved."); return reloadConfig(NULL);
 }
 
+bool busConfig(const char* params) {
+    Yokis::Arguments args(params);
+    if (!args.valid || args.count!=3 || !Yokis::validDeviceName(args.at(1))) return false;
+    Device* entry=Device::getFromList(g_devices,MQTT_MAX_NUM_OF_YOKIS_DEVICES,args.at(2));
+    Device* previous=Device::getFromList(g_devices,MQTT_MAX_NUM_OF_YOKIS_DEVICES,args.at(1));
+    if (!entry || entry->getMode()!=SHUTTER || !entry->isConfigured() ||
+        (previous && previous->getMode()!=SHUTTER_BUS)) return false;
+    Device group(entry); group.setName(args.at(1)); group.setMode(SHUTTER_BUS);
+    if (!group.saveToLittleFS()) return false;
+    return reloadConfig(nullptr);
+}
+
+bool statusAllCallback(const char* params) {
+    Yokis::Arguments args(params);
+    if (!args.valid || args.count!=1) return false;
+    Yokis::requestStatusRefresh();
+    LOG.println("Status refresh queued; commands remain prioritary");
+    return true;
+}
+
 bool clearConfig(const char*) {
     return Device::clearConfigFromLittleFS() && reloadConfig(NULL);
 }
@@ -372,8 +399,8 @@ bool reloadConfig(const char*) {
     for (auto* previous : g_devices) {
         if (!previous) continue;
         Device* next = Device::getFromList(loaded, n, previous->getName());
-        if ((!next || (next->getMode() == SHUTTER) != (previous->getMode() == SHUTTER)) &&
-            !Yokis::queueDiscoveryCleanup(previous->getName(), previous->getMode() == SHUTTER)) {
+        if ((!next || Yokis::isCoverMode(next->getMode()) != Yokis::isCoverMode(previous->getMode())) &&
+            !Yokis::queueDiscoveryCleanup(previous->getName(), Yokis::isCoverMode(previous->getMode()))) {
             for (auto* candidate : loaded) delete candidate;
             LOG.println("Reload aborted: discovery cleanup could not be saved");
             return false;
@@ -381,6 +408,7 @@ bool reloadConfig(const char*) {
     }
 #endif
     finishActiveHold(); // Release before freeing the job's borrowed Device.
+    Yokis::cancelStatusRefresh();
     // Detach all callbacks BEFORE freeing their Device arguments.
     for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i)
         if (g_deviceStatusPollers[i]) g_deviceStatusPollers[i]->detach();
@@ -396,7 +424,7 @@ bool reloadConfig(const char*) {
     for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
         delete g_deviceStatusPollers[i]; g_deviceStatusPollers[i] = NULL;
         delete g_devices[i]; g_devices[i] = loaded[i];
-        if (g_devices[i] && g_devices[i]->getMode() != NO_RCPT) {
+        if (g_devices[i] && g_devices[i]->getMode() != NO_RCPT && g_devices[i]->getMode() != SHUTTER_BUS) {
             g_deviceStatusPollers[i] = new Ticker();
             if (g_deviceStatusPollers[i])
                 g_deviceStatusPollers[i]->attach_ms(random(4000, 10000), pollDevice, g_devices[i]);

@@ -61,6 +61,11 @@ def load_settings(config_path, environment):
         section = "env:" + environment
         if not configuration.has_section(section):
             raise UploadError("OTA environment is missing from private configuration")
+        # PlatformIO prints every ENV option in verbose mode before hooks run.
+        # A separate non-inherited section keeps authentication out of that dump.
+        private_section = "ota_private:" + environment
+        if configuration.has_section(private_section):
+            section = private_section
         flags = configuration.get(section, "upload_flags", fallback="")
         tokens = shlex.split(flags, posix=True)
     except UploadError:
