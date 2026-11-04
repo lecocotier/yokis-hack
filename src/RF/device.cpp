@@ -273,6 +273,7 @@ Device* Device::getFromList(Device** devices, size_t size,
 }
 
 #ifdef ESP8266
+bool Device::configurationSynchronized_ = false;
 namespace {
 // Consume the ENTIRE physical line even when too long. Never parse its tail as
 // another device. CRLF and a last line without LF remain backward compatible.
@@ -369,6 +370,7 @@ bool Device::writeConfig(const Device* replacement, const char* removedName, boo
     input.close(); output.close();
     // LittleFS rename replaces the old file atomically; never remove it first.
     if (ok) ok = LittleFS.rename(temp, LITTLEFS_CONFIG_FILENAME);
+    if (ok) configurationSynchronized_ = false;
     if (!ok) { LittleFS.remove(temp); LOG.println("Configuration unchanged: write/validation failed"); }
     return ok;
 }

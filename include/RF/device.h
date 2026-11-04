@@ -68,6 +68,7 @@ class Device {
 
 #ifdef ESP8266
     static bool writeConfig(const Device* replacement, const char* removedName, bool clear);
+    static bool configurationSynchronized_;
 #endif
 
    public:
@@ -136,6 +137,10 @@ class Device {
     void copy(const Device*);
     static Device* getFromList(Device**, size_t, const char*);
 #ifdef ESP8266
+    // Only a fully successful reload authorizes reconciliation against RAM.
+    // A committed file change followed by a failed reload must retain intents.
+    static bool configurationSynchronized() { return configurationSynchronized_; }
+    static void acceptLoadedConfiguration() { configurationSynchronized_ = true; }
     static bool parseConfigLine(const char*, Device&);
     bool formatConfigLine(char*, size_t) const;
     // Save device obj to LittleFS

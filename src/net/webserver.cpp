@@ -86,6 +86,8 @@ WebServer::WebServer(uint16_t port, const char* username, const char* password)
         snapshot.mqttConnected = g_mqtt && g_mqtt->connected();
         snapshot.mqttHost = g_mqtt ? g_mqtt->getHost() : "";
         snapshot.mqttPort = g_mqtt ? g_mqtt->getPort() : 0;
+        snapshot.cleanupPending = g_mqtt && g_mqtt->cleanupPending();
+        snapshot.cleanupBlocked = g_mqtt && g_mqtt->cleanupBlocked();
 #endif
         if (!json || !Yokis::writeDiagnosticJson(json.get(), 4096, snapshot,
                 g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, page)) {

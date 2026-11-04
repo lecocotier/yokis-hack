@@ -30,6 +30,7 @@ class MqttHass : public Mqtt {
     bool refreshClockStarted_ = false;
     uint8_t discoveryIndex_ = 0, replayIndex_ = 0;
     uint32_t lastRefreshAt_ = 0;
+    bool cleanupPending_ = false, cleanupBlocked_ = false;
     char* availabilityJson(char*, size_t);
 
    public:
@@ -44,6 +45,8 @@ class MqttHass : public Mqtt {
     // Bus emissions update up to64 cached members. Publish them cooperatively
     // through serviceRefresh(), so the next individual STOP is serviced first.
     void scheduleStateReplay() { replayPending_ = true; replayIndex_ = 0; }
+    bool cleanupPending() const { return cleanupPending_; }
+    bool cleanupBlocked() const { return cleanupBlocked_; }
     bool removeDiscovery(const Device*);
     bool publishDevice(const Device*);
     bool subscribeDevice(const Device*);

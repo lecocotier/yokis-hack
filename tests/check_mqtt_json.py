@@ -47,7 +47,7 @@ for path in [build / 'shutter-discovery.json', build / 'bus-discovery.json', *so
     assert item['dev']['name'] + '/' == item['~']
 assert detail['state_replayed'] is False
 assert isinstance(detail['status_age_ms'], int)
-print('Network discovery: 5 JSON configurations valid; dual availability and identifiers preserved')
+print('Network discovery: 6 JSON configurations valid; dual availability and identifiers preserved')
 
 # Independently parse the bounded writer's actual bytes, including controls,
 # escapes, UTF-8 and every page of a full 64-device configuration.

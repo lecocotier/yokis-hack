@@ -160,6 +160,10 @@ bool writeDiagnosticJson(char *dst, size_t capacity,
     out.string(snapshot.mqttHost);
     out.literal(",\"port\":");
     out.number(snapshot.mqttPort);
+    out.literal(",\"cleanup_pending\":");
+    out.boolean(snapshot.cleanupPending);
+    out.literal(",\"cleanup_blocked\":");
+    out.boolean(snapshot.cleanupBlocked);
     out.literal("},\"page\":");
     out.number(static_cast<uint32_t>(page));
     out.literal(",\"page_size\":");

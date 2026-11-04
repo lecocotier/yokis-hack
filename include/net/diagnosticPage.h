@@ -24,7 +24,7 @@ static const char diagnostic_html[] PROGMEM = R"YOKISDIAG(<!doctype html>
 <p id="notice" class="notice" role="status" aria-live="polite">Chargement des données…</p>
 <section class="cards" aria-label="Passerelle">
 <article class="card"><h2>Wi-Fi</h2><dl><dt>Connexion</dt><dd id="wifi-connected">—</dd><dt>Réseau</dt><dd id="wifi-ssid">—</dd><dt>Adresse IP</dt><dd id="wifi-ip">—</dd><dt>Signal RSSI</dt><dd id="wifi-rssi">—</dd></dl></article>
-<article class="card"><h2>MQTT</h2><dl><dt>Connexion</dt><dd id="mqtt-connected">—</dd><dt>Configuration</dt><dd id="mqtt-configured">—</dd><dt>Serveur</dt><dd id="mqtt-host">—</dd><dt>Port</dt><dd id="mqtt-port">—</dd></dl></article>
+<article class="card"><h2>MQTT</h2><dl><dt>Connexion</dt><dd id="mqtt-connected">—</dd><dt>Configuration</dt><dd id="mqtt-configured">—</dd><dt>Serveur</dt><dd id="mqtt-host">—</dd><dt>Port</dt><dd id="mqtt-port">—</dd><dt>Nettoyage HA</dt><dd id="cleanup">—</dd></dl></article>
 <article class="card"><h2>Système</h2><dl><dt>Compteur de fonctionnement</dt><dd id="uptime">—</dd><dt>Mémoire libre</dt><dd id="heap">—</dd><dt>Niveau de debug</dt><dd id="debug">—</dd><dt>Build</dt><dd id="build" class="fingerprint">—</dd><dt>Révision Git</dt><dd id="git" class="fingerprint">—</dd><dt>Empreinte des sources</dt><dd id="source" class="fingerprint">—</dd></dl></article>
 </section>
 <section class="devices" aria-labelledby="devices-heading" id="devices-section" aria-busy="false">
@@ -92,6 +92,8 @@ static const char diagnostic_html[] PROGMEM = R"YOKISDIAG(<!doctype html>
         set("mqtt-configured", data.mqtt.configured ? "Configuré" : "Non configuré");
         set("mqtt-host", data.mqtt.host);
         set("mqtt-port", data.mqtt.port);
+        set("cleanup", data.mqtt.cleanup_blocked ? "Bloqué (réessai planifié)" :
+            data.mqtt.cleanup_pending ? "En attente" : "À jour");
         set("uptime", elapsed(data.uptime_ms));
         set("heap", value(data.free_heap) + " octets");
         set("debug", data.debug_level);

@@ -36,6 +36,28 @@ void testCleanupIntegration() {
     CHECK(g_devices[0] && std::string(g_devices[0]->getName()) == old.getName());
     testFs.failRename = false;
 
+    // The file rename can succeed while the following reload fails. Old RAM
+    // must not be mistaken for a recreated device and cancel the durable intent.
+    CHECK(Device::deleteFromConfig(old.getName()));
+    testFs.failOpen=true; CHECK(!reloadConfig(nullptr)); testFs.failOpen=false;
+    CHECK(g_devices[0]!=nullptr);
+    g_mqtt->setDiscoveryDone(false);g_mqtt->publications.clear();
+    for(unsigned i=0;i<3;++i){testClockUs+=200000;g_mqtt->serviceRefresh(g_devices,64);}
+    CHECK(Yokis::hasPendingDiscoveryCleanup());
+    for(const auto& p:g_mqtt->publications)
+        CHECK(p.first.find("/tele/")==std::string::npos || !p.second.empty());
+    // Simulated reboot loses RAM before reading the already-committed file.
+    g_bp->setDevice(nullptr);
+    for(unsigned i=0;i<64;++i){delete g_devices[i];g_devices[i]=nullptr;
+        delete g_deviceStatusPollers[i];g_deviceStatusPollers[i]=nullptr;}
+    CHECK(reloadConfig(nullptr));g_mqtt->publications.clear();
+    for(unsigned i=0;i<7;++i){testClockUs+=200000;g_mqtt->serviceRefresh(g_devices,64);}
+    cleared=false;
+    for(const auto& p:g_mqtt->publications)
+        if(p.first=="homeassistant/cover/removed-offline/config"&&p.second.empty())cleared=true;
+    CHECK(cleared && !Yokis::hasPendingDiscoveryCleanup());
+    CHECK(old.saveToLittleFS());CHECK(reloadConfig(nullptr));
+
     // Retyping owns only the obsolete component, never the new shared states.
     old.setMode(DIMMER); CHECK(old.saveToLittleFS());
     CHECK(Yokis::hasPendingDiscoveryCleanup()); CHECK(reloadConfig(nullptr));
@@ -49,6 +71,18 @@ void testCleanupIntegration() {
         CHECK(p.first.find("/tele/") == std::string::npos || !p.second.empty());
     }
     CHECK(cleared);
+
+    // A corrupt journal must remain available for diagnosis without preventing
+    // an unrelated current device from subscribing or replaying its state.
+    testFs.files["/discovery.cleanup"]=std::make_shared<std::string>("malformed\n");
+    g_mqtt->clearSubscriptions();g_mqtt->subscriptions.clear();
+    g_mqtt->setDiscoveryDone(false);g_mqtt->publications.clear();
+    for(unsigned i=0;i<7;++i){testClockUs+=200000;g_mqtt->serviceRefresh(g_devices,64);}
+    CHECK(g_mqtt->isDiscoveryDone() && !g_mqtt->refreshPending());
+    CHECK(std::find(g_mqtt->subscriptions.begin(),g_mqtt->subscriptions.end(),
+        "removed-offline/cmnd/POWER")!=g_mqtt->subscriptions.end());
+    CHECK(*testFs.files["/discovery.cleanup"]=="malformed\n");
+    CHECK(g_mqtt->cleanupPending() && g_mqtt->cleanupBlocked());
 
     g_bp->setDevice(nullptr);
     for (unsigned i=0; i<64; ++i) { delete g_devices[i]; delete g_deviceStatusPollers[i]; }

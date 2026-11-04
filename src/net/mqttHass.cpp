@@ -57,7 +57,16 @@ void MqttHass::serviceRefresh(Device* const* devices, size_t count) {
     refreshClockStarted_ = true; lastRefreshAt_ = millis();
     // At most one retained deletion/checkpoint per turn. The journal survives
     // offline removals and owns names after the corresponding Device is freed.
-    if (Yokis::serviceDiscoveryCleanup(*this, devices, count) != Yokis::CleanupResult::Idle) return;
+    cleanupPending_ = Yokis::hasPendingDiscoveryCleanup();
+    // The file rename may have committed while reload failed. Until RAM has
+    // accepted that generation, it is not authoritative for cancelling intents.
+    const auto cleanup = Device::configurationSynchronized() ?
+        Yokis::serviceDiscoveryCleanup(*this, devices, count) :
+        (cleanupPending_ ? Yokis::CleanupResult::Blocked : Yokis::CleanupResult::Idle);
+    cleanupBlocked_ = cleanup == Yokis::CleanupResult::Blocked;
+    if (cleanup == Yokis::CleanupResult::Progress) return;
+    // A blocked journal remains untouched and is retried next step. It must
+    // not prevent valid live devices from subscribing or replaying their state.
     if (!birthSubscribed_) {
         // Kept outside the device subscription list: reloading devices neither
         // removes this subscription nor repeatedly replays a retained birth.

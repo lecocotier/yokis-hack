@@ -430,6 +430,7 @@ bool reloadConfig(const char*) {
                 g_deviceStatusPollers[i]->attach_ms(random(4000, 10000), pollDevice, g_devices[i]);
         }
     }
+    Device::acceptLoadedConfiguration();
     LOG.println("Reloaded."); return true;
 }
 

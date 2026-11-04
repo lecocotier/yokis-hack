@@ -22,6 +22,8 @@ struct DiagnosticsSnapshot {
     bool wifiConnected;
     bool mqttConnected;
     bool mqttConfigured;
+    bool cleanupPending;
+    bool cleanupBlocked;
 };
 
 // Serializes cached observations only; requesting diagnostics never starts RF work.
