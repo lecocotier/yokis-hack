@@ -20,6 +20,9 @@ void Pairing::reset() {
 }
 
 bool Pairing::hackPairing() {
+    // The pairing exchange changes payload size after the first packet. The
+    // ISR stores bytes before publishing readsCount; the main loop only waits
+    // and reports results, so serial output cannot delay the packet hand-off.
     reset();
     uint32_t phaseStart = millis();
     bool firstReceived = false;
@@ -116,12 +119,12 @@ void Pairing::getAddressFromRecvData(uint8_t buf[5]) {
 // pairing
 byte Pairing::getChannelFromRecvData() { return recvBuffer[5]; }
 
-// Get device's version bytes - not sure what those bytes are for yet
+// Preserve these opaque bytes verbatim; their full protocol meaning is unknown.
 void Pairing::getVersionFromRecvData(uint8_t buf[3]) {
     memcpy(buf, recvBuffer, 3);
 }
 
-// Get device's serial - not sure what those bytes are for yet
+// This captured field is retained as a serial identifier without reinterpretation.
 void Pairing::getSerialFromRecvData(uint8_t buf[2]) {
     memcpy(buf, recvBuffer+sizeof(uint8_t)*6, 2);
 }

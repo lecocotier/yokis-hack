@@ -2,6 +2,8 @@
 #include "net/wifi.h"
 #include "globals.h"
 
+// SDK station credentials are the persistent source of truth. A temporary AP
+// or broker outage is not a configuration reset; only wifiReset erases them.
 static void prepareStation() {
     // Reconnection must not rewrite or erase credentials saved in SDK flash.
     WiFi.persistent(false);
@@ -17,6 +19,8 @@ static void disconnectMqtt() {
 }
 
 void setupWifi(String ssid, String password) {
+    // Equality of credentials is not equality of connection state: core 3.x
+    // may retain the settings while the radio is OFF, so reconnect explicitly.
     if (strcmp(WiFi.SSID().c_str(), ssid.c_str()) == 0 &&
         strcmp(WiFi.psk().c_str(), password.c_str()) == 0) {
         // Core 3.x may have matching credentials with its radio still OFF.

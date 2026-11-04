@@ -20,8 +20,8 @@
 #define SEP LITTLEFS_CONFIG_SEP
 #endif
 
-// Depending on device, behavior can be different...
-// Still to figure out what can configure that in scanned protocol though.
+// Device type is configured by the user: response bytes overlap between models
+// and are not a reliable product identifier. Enum values are persisted in files.
 enum DeviceMode {
     ON_OFF = 0,  // Reception: OFF=00 00, ON=00 01
     DIMMER,   // Reception: 01 00 -> command not ok, 01 01 -> command ok (second
@@ -75,7 +75,7 @@ class Device {
     // Create a device with a name and all parameters
     Device(const char*, const uint8_t*, uint8_t, const uint8_t*,
            const uint8_t*);
-    // Unallocate memory used
+    // Radio helpers borrow this object; invalidate them before deleting it.
     ~Device();
 
     // Getters

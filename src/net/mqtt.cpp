@@ -4,6 +4,9 @@
 #include "globals.h"
 #include "reliability.h"
 
+// MQTT transport owns reconnect state, subscriptions and gateway availability.
+// MqttHass adds discovery/state replay. Neither class implements RF exchanges,
+// but Mqtt::loop() can synchronously dispatch a command callback that does.
 Mqtt::Mqtt(WiFiClient& wifiClient) : PubSubClient(wifiClient), MqttConfig(), transport_(wifiClient) {
     initializeIdentity();
     // Init subscriptions to NULL
@@ -44,6 +47,8 @@ bool Mqtt::setConnectionInfo(const char* host, uint16_t port, const char* userna
     return true;
 }
 boolean Mqtt::subscribe(const char* topic) {
+    // Callers often build topics on the stack. Keep an owned copy for reconnect
+    // and free it on reload; duplicate subscriptions do not consume more slots.
     if (!topic || !*topic || !connected()) return false;
     for (uint16_t i = 0; i < subscribedTopicIdx; ++i)
         if (strcmp(subscribedTopics[i], topic) == 0) return PubSubClient::subscribe(topic);
@@ -83,6 +88,9 @@ void Mqtt::initializeIdentity() {
 }
 
 void Mqtt::announceGateway() {
+    // PubSubClient success means the packet was written locally, not that the
+    // broker/application acknowledged it. Retry local failures without claiming
+    // this is an end-to-end delivery guarantee.
     if (connected() && gatewayOnlinePending_) {
         lastGatewayPublish_ = millis();
         if (publish(gatewayTopic_, "Online", true)) gatewayOnlinePending_ = false;
@@ -100,6 +108,8 @@ void Mqtt::disconnect() {
 
 // force=false by default
 bool Mqtt::reconnect(bool force) {
+    // Rate-limit connection attempts independently of Wi-Fi recovery. The
+    // socket timeout bounds MQTT response waits, not the full DNS/TCP sequence.
     // No configuration available
     if (this->MqttConfig::isEmpty() || WiFi.status() != WL_CONNECTED) return false;
     if (connected()) return true;

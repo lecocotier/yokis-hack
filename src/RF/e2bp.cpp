@@ -3,6 +3,9 @@
 #include "utils.h"
 #include "reliability.h"
 
+// E2bp implements the captured Yokis command exchange over the low-level NRF
+// driver. Payload bytes and TX/RX timing are installation-specific evidence;
+// they must not be replaced by upstream defaults without radio measurements.
 E2bp::E2bp(uint16_t cepin, uint16_t cspin) : RFConfigurator(cepin, cspin), device(NULL) {
     radioReady = false; reset();
 }
@@ -19,9 +22,8 @@ void E2bp::setDevice(Device* d) {
 
 const Device* E2bp::getDevice() { return this->device; }
 
-// Returns last known device status
-// Not reliable for DIMMER devices as status returned is the one BEFORE the
-// command is executed
+// On/off replies describe the resulting state, while a dimmer can report its
+// pre-command state. Keep both replies so callers can apply that distinction.
 DeviceStatus E2bp::getLastKnownDeviceStatus() {
     if (secondPayloadStatus == UNDEFINED) {
         // We probably never received the second payload.
@@ -29,10 +31,8 @@ DeviceStatus E2bp::getLastKnownDeviceStatus() {
         return firstPayloadStatus;
     }
 
-    // Second payload has the current device status
-    // For ON_OFF devices, this is ok, each command is responding with the
-    // status AFTER the command is executed For dimmers, the status is the one
-    // BEFORE the command is executed !!
+    // Prefer the second decoded reply when available; dimmer callers still
+    // account for the protocol's pre-command state semantics.
     return secondPayloadStatus;
 }
 
@@ -41,7 +41,8 @@ bool E2bp::setDeviceStatus(DeviceStatus ds) {
 
     if (!device || !device->isConfigured()) return false;
     reset();
-    // For all devices, use the on or off payload except for shutters
+    // Shutters have distinct directional and STOP payloads. Their command
+    // response may predate movement, so ShutterFeedback owns the estimate.
     if(device->getMode() == SHUTTER ) {
         if (ds == SHUTTER_STOPPED) {
             getPayload(buf, PL_SHUTTERPAUSE);
@@ -107,11 +108,8 @@ bool E2bp::pauseShutter() {
     return device && device->getMode() == SHUTTER && setDeviceStatus(SHUTTER_STOPPED);
 }
 
-// Toggle a device
-// This function emulates a normal operated e2bp.
-// But it's better to use ON and OFF as they are more reliable and need less
-// communication between devices. To toggle, it's actually better to get
-// status first and invert it.
+// Emulate a remote-button sequence. Direct ON/OFF commands require fewer
+// exchanges; a shutter toggle deliberately omits the cancelling release.
 bool E2bp::toggle() {
     if (!device || !device->isConfigured()) return false;
     const uint32_t start = millis();
@@ -151,11 +149,9 @@ bool E2bp::toggle() {
         }
     }
 
-    // We don't test with retRelease because
-    // we can have a device toggled without receiving a response...
-    // if retPress is ok, we assume, device is toggled successfully
-    // release set device status buf if we don't receive any response,
-    // status won't be set...
+    // Preserve a useful state even if the release reply is missing: the press
+    // can have acted physically already. The return value below still requires
+    // both replies, so a partial exchange is not reported as fully confirmed.
     if (retPress && device->getMode() == ON_OFF) {
         // we know the status, set it
         device->setStatus(getLastKnownDeviceStatus());
@@ -190,12 +186,9 @@ bool E2bp::dimmerSet(const uint8_t number) {
         delay(10);
     }
 
-    // Force status as we know it for sure !
-    // 0 = no action
-    // 1 = simple toggle
-    // 2 = max (or memory)
-    // 3 = mid
-    // 4 = min
+    // Brightness is inferred from the accepted pulse sequence, not measured.
+    // With the assumed dimmer configuration: 2=max, 3=mid, 4=min. A single
+    // pulse is the toggle already handled above; it is not a second toggle.
     if (number > 1 && ret)
         device->setStatus(ON);
     // toggle() has already updated the state for a single pulse.
@@ -238,8 +231,8 @@ DeviceStatus E2bp::pollForStatus() {
     return firstPayloadStatus;
 }
 
-// Get device mode from previous received data from the device
-// This way of detecting devices is not working. Shutter devices may return various values.
+// A status reply cannot reliably identify the device model. Preserve the
+// user's configured type instead of guessing from overlapping reply bytes.
 DeviceMode E2bp::getDeviceModeFromRecvData() {
     // A status byte is not a product identifier. Retain the configured type.
     return device ? device->getMode() : ON_OFF;
@@ -323,12 +316,14 @@ bool E2bp::pressAndHoldFor(unsigned long duration) {
     return ret;
 }
 
-// Fill a given buffer with the correct payload and return a pointer to it
+// Individual shutter orders retain 0x06 and a zero fourth byte. Upstream also
+// supports bus-wide commands (0x16) and different address fields; those are
+// intentionally not inferred from an individual device's configuration here.
 uint8_t* E2bp::getPayload(uint8_t* buf, PayloadType type) {
     buf[0] = 0x00;
-    buf[1] = device->getMode() == SHUTTER ? 0x06 : 0x04;  // 0x16 = Drive all shutters connected to the bus.
+    buf[1] = device->getMode() == SHUTTER ? 0x06 : 0x04;
     buf[2] = 0x00;
-    buf[3] = 0x00;  // Initial project was using 0x20. Might be used to drive specific device over the bus, using another device as gateway?
+    buf[3] = 0x00;
     buf[4] = 0x00;
     buf[5] = 0x00;
     buf[6] = random(0, 0xff);
@@ -388,36 +383,28 @@ bool E2bp::sendPayload(const uint8_t* payload) {
 void E2bp::setupRFModule() {
     radioReady = device && device->isConfigured() && begin();
     if (!radioReady) { LOG.println("RF initialization failed or device not configured"); return; }
+    // Keep the captured register sequence explicit. Replacing it with a
+    // higher-level helper may add reads, delays or other register changes.
     write_register(RF_CH, device->getChannel());
-    // setChannel(device->getChannel());
 
     write_register(RF_SETUP, 0b00100011);
-    // setDataRate(RF24_250KBPS);
-    // setPALevel(RF24_PA_LOW);
 
     write_register(RX_ADDR_P0, device->getHardwareAddress(), 5);
-    // setAddressWidth(5);
-    // openReadingPipe(0, device->getHardwareAddress());
 
     write_register(TX_ADDR, device->getHardwareAddress(), 5);
-    // openWritingPipe(device->getHardwareAddress());
 
     write_register(RX_PW_P0, 0x02);
-    // setPayloadSize(0x02);
 
-    write_register(EN_RXADDR, 1);  // openreadingpipe set this already
+    write_register(EN_RXADDR, 1);
     write_register(EN_AA, 0);
-    // setAutoAck(false);
 
     write_register(NRF_STATUS, 0b01110000);
     write_register(SETUP_RETR, 0);
-    // setRetries(0, 0);
 
     write_register(NRF_CONFIG, 0b00001110);
-    // openWritingPipe(device->getHardwareAddress());  // set to TX mode
 
     yield();
-    delayMicroseconds(4000);  // It's literally what I sniffed on the SPI
+    delayMicroseconds(4000);  // Settling delay retained from the SPI capture.
     flush_rx();               // done when calling begin() but anyway...
     if (IS_DEBUG_ENABLED) {
         printDetails();
@@ -425,6 +412,8 @@ void E2bp::setupRFModule() {
 }
 
 bool E2bp::runMainLoop() {
+    // A response ends this bounded exchange. IRQ edges are only a wake-up
+    // hint: the FIFO must contain a real two-byte reply before reporting RX.
     const uint32_t start = millis();
     receivedResponse = false;
     uint8_t nbLoops = 0;
@@ -461,27 +450,21 @@ bool E2bp::runMainLoop() {
         read(answerBuf, sizeof(answerBuf));
         receivedResponse = true;
 
-//        if (IS_DEBUG_ENABLED) {
-            LOG.print("Received: ");
-            LOG.print(device->getName());
-            LOG.print(" (");
-            LOG.print(device->getModeAsString(device->getMode()));
-            LOG.print(") ");
-            printBinaryRepresentation(answerBuf[0], true);
-            LOG.print(" ");
-            printBinaryRepresentation(answerBuf[1], true);
-             LOG.print(" - ");
-//        }
+        // These transaction traces are currently unconditional. They are not
+        // ISR logging; their cost still contributes to synchronous RF latency.
+        LOG.print("Received: ");
+        LOG.print(device->getName());
+        LOG.print(" (");
+        LOG.print(device->getModeAsString(device->getMode()));
+        LOG.print(") ");
+        printBinaryRepresentation(answerBuf[0], true);
+        LOG.print(" ");
+        printBinaryRepresentation(answerBuf[1], true);
+        LOG.print(" - ");
 
-        // MVR500 window open and delay ok  00 10 11 11 - 00 00 00 10 10 = delay ok
-        // MVR500 window close and delay ok 00 01 11 10 - 00 00 00 10 10 = delay ok
-        // MVR500 window open and pause     00 00 11 11 - 00 00 00 10
-        // MVR500 send open or close the answerbuf take ******* - 00 00 00 11 busy
-        // MVR500 after pair send status when window open 00 00 11 10 - 00 00 00 10
-        // Seems there is various way of devices answering different ways. Trying to cover all.
-        // Devices answering 00 00 gives the same answer when closed or paused.
-        // In such case home assistant will block the close command
-        // Testing if a pause command was issued could be a possibility.
+        // The same resting bytes can mean an endpoint or an intermediate STOP.
+        // ShutterFeedback combines raw observations with this device's command
+        // history; MqttHass publishes the origin/uncertainty of every estimate.
         if (device->getMode() == SHUTTER) {
             Yokis::ShutterFeedback& feedback = device->shutterFeedback();
             firstPayloadStatus = feedback.observe(answerBuf[0], answerBuf[1], millis());
@@ -538,14 +521,15 @@ IRAM_ATTR
 #endif
 void E2bp::stopMainLoop() {
     loopContinue = false;
-    // counter = 0;
 }
 
 #if defined(ESP8266)
 IRAM_ATTR
 #endif
 void E2bp::interruptTxOk() {
-    // No Serial/Telnet work in interrupt context.
+    // The immediate TX->RX switch is retained from the captured protocol.
+    // No logging here. Its SPI callees still require IRAM/reentrancy hardening;
+    // adding IRAM_ATTR to this function alone does not make the path safe.
     write_register(NRF_CONFIG, 0b00001111);  // PRX
     ce(HIGH);
     write_register(NRF_STATUS, 0b01110000);  // Reset interrupts
@@ -555,8 +539,7 @@ void E2bp::interruptTxOk() {
 IRAM_ATTR
 #endif
 void E2bp::interruptRxReady() {
-
-    // counter++;
+    // Defer FIFO reads and interpretation to runMainLoop().
     stopMainLoop();
 }
 

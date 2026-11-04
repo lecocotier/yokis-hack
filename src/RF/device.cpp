@@ -7,6 +7,9 @@
 #include <FS.h>
 #endif
 
+// A Device owns configuration and volatile observations; it does not own the
+// radio. Availability, decoded state and inferred brightness are separate
+// facts, so an unknown position does not automatically make a device Offline.
 Device::Device(const char* dname)
     : channel(0), mode(ON_OFF), status(UNDEFINED), availability(ONLINE),
       brightness(BRIGHTNESS_OFF), lastUpdateMillis(0),
@@ -280,6 +283,8 @@ bool readConfigLine(File& f, char* buf, size_t cap) {
 }
 
 bool Device::parseConfigLine(const char* line, Device& result) {
+    // Parse into a candidate and copy only after every field is valid. The
+    // persisted field order and enum values must remain migration-compatible.
     if (!line || strlen(line) >= Yokis::ConfigLineSize) return false;
     char buf[Yokis::ConfigLineSize]; strcpy(buf, line);
     size_t len = strlen(buf);
@@ -317,6 +322,9 @@ bool Device::formatConfigLine(char* buf, size_t size) const {
 }
 
 bool Device::writeConfig(const Device* replacement, const char* removedName, bool clear) {
+    // Rewrite into a sibling temporary file, then replace by rename. Never
+    // remove the original first: a detected write failure must leave it usable.
+    // This guards software failures, not a certified power-loss scenario.
     if (!YokisLittleFS::init()) return false;
     const char* temp = "/yokis.conf.tmp";
     File input;
@@ -358,6 +366,8 @@ bool Device::deleteFromConfig(const char* name) {
 bool Device::clearConfigFromLittleFS() { return writeConfig(NULL, NULL, true); }
 
 int Device::loadFromLittleFS(Device** devices, const unsigned int size) {
+    // The caller supplies an empty scratch array. Only reloadConfig() swaps
+    // these candidates into the active list after the whole file is accepted.
     if (!devices || !YokisLittleFS::init()) return -1;
     if (!LittleFS.exists(LITTLEFS_CONFIG_FILENAME)) return 0;
     File f = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");

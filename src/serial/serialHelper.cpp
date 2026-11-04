@@ -3,6 +3,8 @@
 #include "serial/flagCallback.h"
 #include "serial/usageCallback.h"
 
+// One bounded line buffer serves serial and Telnet. Keep overflow sticky until
+// the line ending: executing the tail as another command could act on a device.
 SerialHelper::SerialHelper() {
     LOG.begin(SERIAL_BAUDRATE);
     callbacksIndex = 0;
@@ -63,6 +65,8 @@ void SerialHelper::readFromSerial() {
     }
 }
 bool SerialHelper::executeCallback(const char* cmd) {
+    // Return whether the verb was found; the callback reports execution failure
+    // separately. This keeps "command not found" distinct from an RF timeout.
     if (!cmd || !*cmd) return false;
     for (uint8_t i = 0; i < callbacksIndex; ++i) {
         if (strcmp(cmd, callbacks[i]->getCommand()) == 0) {

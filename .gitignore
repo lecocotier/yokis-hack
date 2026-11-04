@@ -9,3 +9,12 @@
 
 /tests/build/
 /source-snapshot.zip
+
+# Private installation notes can contain Wi-Fi/MQTT credentials and RF pairing data.
+/DETAILS LIVRAISON.txt
+
+# Machine- and installation-specific settings. Never commit credentials.
+/platformio.local.ini
+/include/local_secrets.h
+/local/
+/.tools/

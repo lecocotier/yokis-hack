@@ -4,6 +4,9 @@
 #include "globals.h"
 #include "reliability.h"
 
+// Home Assistant receives three distinct facts: gateway connection, radio
+// reachability and device state. Cached/estimated state must not overwrite
+// either availability flag or pretend to be a fresh radio observation.
 MqttHass::MqttHass(WiFiClient& wifiClient) : Mqtt(wifiClient) {
     MqttConfig config = MqttConfig::loadFromLittleFS();
 
@@ -102,6 +105,9 @@ char* MqttHass::newMessageJson(const Device* device, char* buf) {
     const char* name = device->getName();
     const bool shutter = device->getMode() == SHUTTER;
     const bool dimmer = device->getMode() == DIMMER;
+    // Ambiguous shutter replies cannot supply a reliable intermediate position.
+    // Optimistic control keeps the buttons usable; mapping stopped to None
+    // prevents Home Assistant from treating a STOP as a proved endpoint.
     const char* modeFields = shutter ?
         "\"optimistic\":true,\"val_tpl\":\"{{ 'None' if value_json.POWER == 'stopped' else value_json.POWER }}\","
         "\"json_attr_t\":\"~tele/DETAIL\",\"payload_open\":\"ON\",\"payload_close\":\"OFF\",\"payload_stop\":\"PAUSE\"," :
@@ -173,6 +179,9 @@ bool MqttHass::notifyPower(const Device* device, bool replayed) {
 }
 
 bool MqttHass::notifyPower(const Device* device, DeviceStatus ds, bool replayed) {
+    // Retain the last snapshot for late subscribers. DETAIL records firmware
+    // replay and the age at publication; it cannot detect a later broker replay
+    // or convert an estimate into a measured physical position.
     char buf[96];
     char bufPayload[64];
 
@@ -228,6 +237,8 @@ bool MqttHass::subscribeDevice(const Device* device) {
     return ok;
 }
 void MqttHass::removeDiscovery(const Device* device) {
+    // Retained messages outlive the local Device. Clear them while connected;
+    // there is no durable offline deletion queue in this firmware.
     char topic[128]; newPublishTopic(device, topic); publish(topic, "", true);
     const char* suffixes[] = {"STATE", "DETAIL", "BRIGHTNESS", "LWT"};
     for (const char* suffix : suffixes) {

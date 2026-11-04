@@ -21,6 +21,8 @@ void Copy::setupRFModule() {
 }
 
 bool Copy::send() {
+    // Reproduce both captured pairing packets. This helper borrows Device;
+    // it neither changes the configured device type nor takes ownership.
     if (!device || !device->isConfigured()) return false;
 
     const uint32_t start = millis();
@@ -50,14 +52,6 @@ bool Copy::send() {
     while (!Yokis::elapsed(millis(), start, 200)) {
         delay(1);  // let time to send packets
     }
-
-    /*
-    LOG.print(device->getName());
-    if (isFailed) {
-        LOG.println(" - Copy failed.");
-    } else {
-        LOG.println(" - Copied successfully.");
-    }*/
 
     return firstOk && secondOk;
 }

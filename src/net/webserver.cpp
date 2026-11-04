@@ -4,6 +4,8 @@
 #include "reliability.h"
 
 namespace {
+// AsyncTCP callbacks validate and stage one update. Flash writes and network
+// reconnects are deferred to loop(), avoiding reentrant work in the callback.
 bool pending = false, pendingWifi = false, pendingMqtt = false;
 uint32_t pendingAt = 0;
 String nextSsid, nextPassword;
@@ -11,6 +13,8 @@ String nextSsid, nextPassword;
 MqttConfig nextMqtt;
 #endif
 String escaped(const String& s) {
+    // Protect the quoted HTML attribute syntax. Escaping does not authenticate
+    // this legacy form or prevent secrets being returned to a network client.
     String out;
     for (const char* p = s.c_str(); *p; ++p) {
         switch (*p) {
@@ -74,6 +78,8 @@ WebServer::WebServer(uint16_t port) : AsyncWebServer(port) {
 }
 WebServer::~WebServer() {}
 void WebServer::processPending() {
+    // The short delay gives the HTTP response a chance to leave before Wi-Fi
+    // is reconfigured. HTTP 202 acknowledges queuing, not successful saving.
     if (!pending || !Yokis::elapsed(millis(), pendingAt, 100)) return;
     bool ok = true;
 #ifdef MQTT_ENABLED

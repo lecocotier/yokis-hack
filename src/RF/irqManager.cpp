@@ -2,20 +2,15 @@
 #include "RF/configurator.h"
 #include "globals.h"
 
-// Needed to compile on ESP8266 platform
-// To use interrupt, we have to use IRAM_ATTR to store the function in the
-// RAM See
-// https://stackoverflow.com/questions/58113937/esp8266-arduino-why-is-it-necessary-to-add-the-icache-ram-attr-macro-to-isrs-an
+// One physical NRF is shared by all helpers. irqType selects the current
+// owner; callbacks must not log, allocate or yield in interrupt context.
+// IRAM_ATTR covers this entry point only: the compiled RF24_forked callees
+// still reside in flash in the audited build (see doc/audit-2026-11-04.md).
 #if defined(ESP8266)
 IRAM_ATTR
 #endif
-// Process IRQ - function has to be static for Arduino's attachInterrupt
-// I never find another way of doing this than by using IRQ pin :/
-// The guys from Yokis made this complicated as far as I can tell...
-// I would be very curious to see their code but hey, they support a whole bunch
-// of NRF24 chips !
 void IrqManager::processIRQ() {
-    // Any RFConfigurator object can do the job
+    // All helpers address the same chip, but their IRQ side effects differ.
     RFConfigurator* rf = NULL;
     bool txOk, txFailed, rxReady;
 

@@ -5,6 +5,8 @@
 void pollForStatus(Device* device);
 
 void expirePostStopChecks() {
+    // Expire even if polling is disabled or another RF mode owns the chip.
+    // Otherwise an old STOP estimate could survive indefinitely as a position.
     for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
         Device* d = g_devices[i];
         if (!d || d->getMode() != SHUTTER) continue;
@@ -26,6 +28,8 @@ bool postStopChecksPending() {
 }
 
 bool servicePostStopPolling() {
+    // The verification state belongs to each Device. Round-robin selection
+    // shares the single radio without mixing command context between shutters.
     // Poll OFF / special RF modes suppress ALL automatic RF, including STOP checks.
     if (!FLAG_IS_ENABLED(FLAG_POLLING) || IrqManager::irqType != E2BP) return false;
     static unsigned next = 0;

@@ -2,6 +2,15 @@
 
 # yokis-hack
 
+For this installation's fork, see the [architecture and design choices](doc/architecture.md)
+and the [4 November 2026 source/upstream audit](doc/audit-2026-11-04.md).
+
+Local deployment settings belong in `platformio.local.ini` (copy
+`platformio.local.example.ini`), which is excluded from Git. Never put real
+addresses or credentials in the public configuration. Before publishing, run
+`python tools/check_private_config.py --staged` to check the Git index against
+known local values without displaying them.
+
 Yokis-hack is a project around the reverse engineering of Yokis devices, a french company building stuff for home automation.
 I started this project to better automate my own installation and to better understand the proprietary protocol driving my stuff :) !
 

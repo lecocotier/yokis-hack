@@ -12,6 +12,9 @@
 #include "printf.h"
 #include "serial/serialHelper.h"
 
+// This module owns startup and cooperative scheduling. Radio helpers execute
+// synchronously: priority checks below prevent starting background work ahead
+// of an already queued command, but cannot preempt a transaction in progress.
 #ifdef ESP8266
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
@@ -23,10 +26,11 @@
 #include "net/webserver.h"
 #endif
 
-// static irqType initialization
+// Before normal operation, route an unexpected IRQ to the pairing helper.
 volatile IrqType IrqManager::irqType = PAIRING;
 
-// globals' initialization
+// Application-owned objects live for the firmware lifetime. E2bp, Scanner and
+// Copy borrow Device pointers; reloadConfig() invalidates those before deletion.
 byte g_ConfigFlags = FLAG_POLLING;
 SerialHelper* g_serial;
 Pairing* g_pairingRF;
@@ -44,7 +48,6 @@ TelnetSpy g_telnetAndSerial;
 Device* g_devices[MQTT_MAX_NUM_OF_YOKIS_DEVICES];
 #endif // ESP8266
 
-//
 #ifdef ESP8266
 
 WebServer webserver(80);
@@ -60,7 +63,9 @@ void mqttCallback(char*, uint8_t*, unsigned int);
 
 #endif // ESP8266
 
-// Setup inits everything: singletons and commands' callback
+// Load persistent devices before networking so discovery starts from one
+// coherent configuration. Static global pointers are initially null, including
+// g_mqtt while the first reloadConfig() and Wi-Fi setup are running.
 void setup() {
     randomSeed(micros());
 
@@ -79,8 +84,7 @@ void setup() {
     // Load all previously stored devices from LittleFS memory
     reloadConfig(NULL);
 
-    // Setting up configured wifi or AP mode
-    // If compilation options are present, override any existing configuration
+    // Explicit build-time credentials take precedence over SDK-saved settings.
     #ifdef WIFI_SSID
         String ssid = WIFI_SSID;
         String psk = "";
@@ -91,7 +95,7 @@ void setup() {
         LOG.println(WIFI_SSID);
         setupWifi(ssid, psk);
     #else
-        setupWifi(); // Setup existing configuration of set AP mode for initial config
+        setupWifi(); // Reuse saved credentials; use AP mode for initial setup.
     #endif // WIFI_SSID
 
     // Starting webserver
@@ -102,7 +106,8 @@ void setup() {
     g_mqtt->setCallback(mqttCallback);
     #endif
 
-    // OTA
+    // Report a deliberate gateway shutdown before OTA disconnects networking.
+    // This build does not configure OTA authentication; see the audit report.
     ArduinoOTA.onStart([]() {
 #ifdef MQTT_ENABLED
         if (g_mqtt) g_mqtt->disconnect();
@@ -139,7 +144,8 @@ void setup() {
     // Registering all commands
     registerAllCallbacks();
 
-    // Handle interrupt pin
+    // Attach only after every IRQ target exists. IRAM safety also depends on
+    // the callees inside RF24_forked, not just this handler's IRAM_ATTR.
     pinMode(IRQ_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(IRQ_PIN), IrqManager::processIRQ, FALLING);
 
@@ -157,6 +163,8 @@ void loop() {
     ArduinoOTA.handle();
 
     #if defined(MQTT_ENABLED)
+    // Expiration changes metadata only. A late STOP check must not manufacture
+    // a position, nor start radio traffic while a special RF mode owns the chip.
     expirePostStopChecks(); // deadline failure is metadata, never automatic RF
     g_mqtt->loop();
 
@@ -209,8 +217,8 @@ void pollForStatus(Device* d) {
             g_mqtt->notifyOnline(d);
         }
 
-        // Update device status - even if unchanged
-        // Hence, in case of hass restart, status are updated
+        // Refresh the observation timestamp even for an unchanged state. A
+        // received but undecodable reply proves reachability, not position.
         d->setStatus(ds);
         if (d->getMode() == DIMMER) {
             if (ds == ON && d->getBrightness() == 0)
@@ -247,6 +255,8 @@ void pollForStatus(Device* d) {
 
 #if defined(ESP8266) && defined(MQTT_ENABLED)
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+    // PubSubClient lends both buffers for this callback only. Validate and copy
+    // the bounded device name before touching the shared radio helper.
     if (g_mqtt && g_mqtt->handleBirth(topic, payload, length)) return;
     Yokis::MqttRequest request;
     if (!Yokis::parseMqtt(topic, payload, length, request)) {

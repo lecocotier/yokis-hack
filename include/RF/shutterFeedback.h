@@ -9,9 +9,10 @@ enum DeviceStatus { OFF = 0, ON, UNDEFINED, SHUTTER_OPENING, SHUTTER_CLOSING,
                     SHUTTER_STOPPED, SHUTTER_OPENED, SHUTTER_CLOSED };
 
 namespace Yokis {
-// Context belongs to each Device, NOT the shared E2bp radio. This restores the
-// user's local STOP heuristic (effective window: 5000ms, not the old comment's
-// 500ms). A simple resting reply is an estimate, never a proved limit switch.
+// Context belongs to each Device, not the shared E2bp radio: an order for one
+// shutter must not change how another shutter's identical reply is interpreted.
+// The 5000ms STOP window is an installation heuristic. A resting reply remains
+// an estimate, not a measured intermediate position or a proved limit switch.
 class ShutterFeedback {
 public:
     static const uint32_t StopWindowMs = 5000;

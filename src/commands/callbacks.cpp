@@ -3,6 +3,8 @@
 #include "globals.h"
 #include "reliability.h"
 
+// Serial and Telnet share the same validated command handlers. Callbacks run
+// from the main loop; only the selected RF helper may own the physical NRF.
 void registerAllCallbacks() {
     // Serial setup
     g_serial->registerCallback(new GenericCallback(
@@ -131,7 +133,10 @@ bool pairingCallback(const char*) {
     return res;
 }
 
-// Get a device from the list with the given params
+// params is the full console line, including the command at argument 0.
+// Omitting a name targets the temporary pairing device, not an arbitrary saved
+// device. The bounded tokenizer accepts quoted arguments, but configured
+// device names themselves cannot contain spaces.
 Device* getDeviceFromParams(const char* params) {
 #ifdef ESP8266
     Yokis::Arguments args(params);
@@ -143,7 +148,8 @@ Device* getDeviceFromParams(const char* params) {
 #endif
 }
 
-// Generic on, off or toggle
+// Keep console commands on the same E2bp implementation as MQTT. The result
+// describes radio confirmation, not a measured motor position or travel time.
 bool changeDeviceState(const char* params, bool (E2bp::*func)(void)) {
     Device* d = getDeviceFromParams(params);
 
@@ -315,6 +321,8 @@ bool restoreConfig(const char* params) {
 }
 
 bool reloadConfig(const char*) {
+    // Treat reload as a transaction: parse all replacements first, detach
+    // timer callbacks and borrowed references, then replace the active list.
     Device* loaded[MQTT_MAX_NUM_OF_YOKIS_DEVICES] = {};
     int n = Device::loadFromLittleFS(loaded, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     if (n < 0) return false;
@@ -353,7 +361,8 @@ bool deleteFromConfig(const char* params) {
     return args.valid && args.count == 2 && Device::deleteFromConfig(args.at(1)) && reloadConfig(NULL);
 }
 
-// Interrupt function
+// A timer requests work only. RF and MQTT stay in loop(), where they can be
+// ordered against user commands and urgent post-STOP verification.
 void pollDevice(Device* d) {
     if (FLAG_IS_ENABLED(FLAG_POLLING)) d->pollMePlease();
 }

@@ -58,7 +58,8 @@ extern "C" {
 // Serial print buffer size
 #define PRINT_BUFFER_SIZE 32
 
-// Yokis commands
+// Individual-device opcodes retained from the installation's working captures.
+// 0x1a is OFF for a switch and STOP for a shutter; the mode supplies the meaning.
 #define YOKIS_CMD_BEGIN 0x35
 #define YOKIS_CMD_END 0x53
 #define YOKIS_CMD_STATUS 0x00
@@ -88,11 +89,8 @@ extern Device* g_devices[MQTT_MAX_NUM_OF_YOKIS_DEVICES];
 extern Ticker* g_deviceStatusPollers[MQTT_MAX_NUM_OF_YOKIS_DEVICES];
 
 #ifdef MQTT_ENABLED
-// Don't update the same device during the MQTT_UPDATE_MILLIS_WINDOW
-// time window !
-// HASS sends sometimes multiple times the same MQTT message in a row...
-// Usually 2 MQTT messages sent in a row are processed very quickly
-// something like 3 to 5 ms
+// Historical public constant. Actual filtering lives in Yokis::CommandHistory:
+// it covers only the same acknowledged non-shutter command, never a poll/STOP.
 #define MQTT_UPDATE_MILLIS_WINDOW 100
 extern MqttHass* g_mqtt;
 #endif // MQTT_ENABLED

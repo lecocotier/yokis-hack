@@ -6,6 +6,8 @@
 #include <string.h>
 
 namespace Yokis {
+// Shared validation rules keep console, MQTT and persisted configuration from
+// accepting different representations of the same command/device identifier.
 static const size_t DeviceNameMax = 48;
 static const size_t ConfigLineSize = 128;
 

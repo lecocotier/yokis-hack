@@ -27,6 +27,8 @@ IRAM_ATTR
 void Scanner::interruptRxReady() { rxPending = true; }
 
 void Scanner::service() {
+    // FIFO access and serial output belong to the main loop. The IRQ handler
+    // only records a notification; checking the FIFO also tolerates a lost edge.
     if (!getDevice()) return;
     rxPending = false;
     if (available()) {

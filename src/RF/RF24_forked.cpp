@@ -79,6 +79,9 @@ void RF24_forked::ce(bool level) {
 /****************************************************************************/
 
 inline void RF24_forked::beginTransaction() {
+    // This selects/configures SPI; it is not an IRQ exclusion mechanism on
+    // ESP8266. An NRF IRQ can re-enter this driver while CSN is already low.
+    // Preserve timing here until a measured critical-section fix is validated.
 #if defined(RF24_SPI_TRANSACTIONS)
     _SPI.beginTransaction(SPISettings(RF24_SPI_SPEED, MSBFIRST, SPI_MODE0));
 #endif
@@ -410,7 +413,7 @@ RF24_forked::RF24_forked(uint16_t _cepin, uint16_t _cspin)
       payload_size(32),
       dynamic_payloads_enabled(false),
       addr_width(5),
-      csDelay(5)  //,pipe0_reading_address(0)
+      csDelay(5)
 {
     pipe0_reading_address[0] = 0;
 }

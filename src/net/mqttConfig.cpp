@@ -3,6 +3,9 @@
 #include "globals.h"
 #include "reliability.h"
 
+// Configuration fields are bounded because they are copied into MQTT packets
+// and a legacy pipe-delimited file. Reject overflow/delimiters rather than
+// silently truncating credentials or changing the persisted format.
 MqttConfig::MqttConfig() : port(MQTT_DEFAULT_PORT) {
     memset(host, 0, sizeof(host)); memset(username, 0, sizeof(username));
     memset(password, 0, sizeof(password));
@@ -32,6 +35,8 @@ void MqttConfig::printDebug(Print& p) {
     p.print("Username: "); p.println(username); p.print("Password: "); p.println(password);
 }
 bool MqttConfig::saveToLittleFS() {
+    // Match Arduino println's CRLF byte count and check write errors before
+    // rename. The previous file stays authoritative until replacement succeeds.
     if (!YokisLittleFS::init()) return false;
     char buf[sizeof(host) + sizeof(username) + sizeof(password) + 12];
     int n = snprintf(buf, sizeof(buf), "%s|%u|%s|%s|", host, unsigned(port), username, password);
