@@ -42,7 +42,7 @@ def main() -> int:
         env["ASAN_OPTIONS"] = "detect_leaks=1"
     sources = ["tests/test_regression.cpp", "tests/build/callbacks.cpp", "src/RF/device.cpp", "src/RF/e2bp.cpp",
                "src/RF/configurator.cpp", "src/utils.cpp", "src/postStopPolling.cpp", "src/RF/pairing.cpp",
-               "src/RF/copy.cpp", "src/RF/scanner.cpp", "src/commands/callbacks.cpp"]
+               "src/RF/copy.cpp", "src/RF/scanner.cpp", "src/RF/irqManager.cpp", "src/commands/callbacks.cpp"]
     sources += sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "src/serial").glob("*.cpp"))
     sources += ["src/net/wifi.cpp", "src/net/webserver.cpp", "src/net/mqtt.cpp", "src/net/mqttHass.cpp",
                 "src/net/mqttConfig.cpp", "src/storage/yokisLittleFS.cpp"]
@@ -55,6 +55,13 @@ def main() -> int:
     subprocess.run([compiler, *flags, "tests/test_admin_console.cpp", "src/serial/adminConsole.cpp",
                     "-o", str(console)], cwd=ROOT, env=env, check=True)
     subprocess.run([str(console)], cwd=ROOT, env=env, check=True)
+    radio = build / ("radio.exe" if windows else "radio")
+    radio_flags = [f for f in flags if not f.startswith("-I")]
+    radio_flags += ["-DARDUINO", "-DMINIMAL", "-DYOKIS_RADIO_TEST", "-Itests/radio_host", "-Iinclude", "-Itests/host"]
+    subprocess.run([compiler, *radio_flags, "tests/test_radio_transport.cpp", "src/RF/RF24_forked.cpp",
+                    "src/RF/irqTransport.cpp", "-o", str(radio)], cwd=ROOT, env=env, check=True)
+    subprocess.run([str(radio)], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, "tests/check_mqtt_json.py"], cwd=ROOT, env=env, check=True)
     return 0
 

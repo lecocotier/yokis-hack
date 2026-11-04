@@ -159,6 +159,7 @@ void setup() {
 }
 
 void loop() {
+    IrqManager::servicePending();
     bool automaticRadioWork = false;
 #if defined(ESP8266)
     LOG.handle(); // authenticate and assemble complete USB/network command lines

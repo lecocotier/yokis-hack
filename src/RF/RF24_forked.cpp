@@ -12,6 +12,7 @@
 #include "RF/RF24_forked.h"
 #include <RF24_config.h>
 #include <nRF24L01.h>
+#include "RF/radioCritical.h"
 
 /****************************************************************************/
 
@@ -79,9 +80,7 @@ void RF24_forked::ce(bool level) {
 /****************************************************************************/
 
 inline void RF24_forked::beginTransaction() {
-    // This selects/configures SPI; it is not an IRQ exclusion mechanism on
-    // ESP8266. An NRF IRQ can re-enter this driver while CSN is already low.
-    // Preserve timing here until a measured critical-section fix is validated.
+    // Callers hold a saved-state RadioCritical until CSN is high again.
 #if defined(RF24_SPI_TRANSACTIONS)
     _SPI.beginTransaction(SPISettings(RF24_SPI_SPEED, MSBFIRST, SPI_MODE0));
 #endif
@@ -103,6 +102,7 @@ uint8_t RF24_forked::read_register(uint8_t reg, uint8_t* buf, uint8_t len) {
     uint8_t status;
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();  // configures the spi settings for RPi, locks mutex and
                          // setting csn low
     uint8_t* prx = spi_rxbuff;
@@ -123,16 +123,19 @@ uint8_t RF24_forked::read_register(uint8_t reg, uint8_t* buf, uint8_t len) {
     while (--size) {
         *buf++ = *prx++;
     }
-    endTransaction();  // unlocks mutex and setting csn high
+    endTransaction();
+    transactionGuard.release();  // unlocks mutex and setting csn high
 
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(R_REGISTER | (REGISTER_MASK & reg));
     while (len--) {
         *buf++ = _SPI.transfer(0xff);
     }
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -146,6 +149,7 @@ uint8_t RF24_forked::read_register(uint8_t reg) {
 
 #if defined(RF24_LINUX)
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
 
     uint8_t* prx = spi_rxbuff;
@@ -157,12 +161,15 @@ uint8_t RF24_forked::read_register(uint8_t reg) {
     result = *++prx;  // result is 2nd byte of receive buffer
 
     endTransaction();
+    transactionGuard.release();
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     _SPI.transfer(R_REGISTER | (REGISTER_MASK & reg));
     result = _SPI.transfer(0xff);
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -175,6 +182,7 @@ uint8_t RF24_forked::write_register(uint8_t reg, const uint8_t* buf, uint8_t len
     uint8_t status;
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     uint8_t* prx = spi_rxbuff;
     uint8_t* ptx = spi_txbuff;
@@ -186,12 +194,15 @@ uint8_t RF24_forked::write_register(uint8_t reg, const uint8_t* buf, uint8_t len
     _SPI.transfernb((char*)spi_txbuff, (char*)spi_rxbuff, size);
     status = *prx;  // status is 1st byte of receive buffer
     endTransaction();
+    transactionGuard.release();
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(W_REGISTER | (REGISTER_MASK & reg));
     while (len--) _SPI.transfer(*buf++);
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -207,6 +218,7 @@ uint8_t RF24_forked::write_register(uint8_t reg, uint8_t value) {
         printf_P(PSTR("write_register(%02x,%02x)\r\n"), reg, value));
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     uint8_t* prx = spi_rxbuff;
     uint8_t* ptx = spi_txbuff;
@@ -216,12 +228,15 @@ uint8_t RF24_forked::write_register(uint8_t reg, uint8_t value) {
     _SPI.transfernb((char*)spi_txbuff, (char*)spi_rxbuff, 2);
     status = *prx++;  // status is 1st byte of receive buffer
     endTransaction();
+    transactionGuard.release();
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(W_REGISTER | (REGISTER_MASK & reg));
     _SPI.transfer(value);
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -243,6 +258,7 @@ uint8_t RF24_forked::write_payload(const void* buf, uint8_t data_len,
         printf("[Writing %u bytes %u blanks]\n", data_len, blank_len););
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     uint8_t* prx = spi_rxbuff;
     uint8_t* ptx = spi_txbuff;
@@ -256,9 +272,11 @@ uint8_t RF24_forked::write_payload(const void* buf, uint8_t data_len,
     _SPI.transfernb((char*)spi_txbuff, (char*)spi_rxbuff, size);
     status = *prx;  // status is 1st byte of receive buffer
     endTransaction();
+    transactionGuard.release();
 
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(writeType);
     while (data_len--) {
@@ -268,6 +286,7 @@ uint8_t RF24_forked::write_payload(const void* buf, uint8_t data_len,
         _SPI.transfer(0);
     }
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -289,6 +308,7 @@ uint8_t RF24_forked::read_payload(void* buf, uint8_t data_len) {
         printf("[Reading %u bytes %u blanks]\n", data_len, blank_len););
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     uint8_t* prx = spi_rxbuff;
     uint8_t* ptx = spi_txbuff;
@@ -312,8 +332,10 @@ uint8_t RF24_forked::read_payload(void* buf, uint8_t data_len) {
         *current = *prx;
     }
     endTransaction();
+    transactionGuard.release();
 #else
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(R_RX_PAYLOAD);
     while (data_len--) {
@@ -323,6 +345,7 @@ uint8_t RF24_forked::read_payload(void* buf, uint8_t data_len) {
         _SPI.transfer(0xff);
     }
     endTransaction();
+    transactionGuard.release();
 
 #endif
 
@@ -342,9 +365,11 @@ uint8_t RF24_forked::flush_tx(void) { return spiTrans(FLUSH_TX); }
 uint8_t RF24_forked::spiTrans(uint8_t cmd) {
     uint8_t status;
 
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     status = _SPI.transfer(cmd);
     endTransaction();
+    transactionGuard.release();
 
     return status;
 }
@@ -413,6 +438,7 @@ RF24_forked::RF24_forked(uint16_t _cepin, uint16_t _cspin)
       payload_size(32),
       dynamic_payloads_enabled(false),
       addr_width(5),
+      irqTransport_(_cepin, _cspin),
       csDelay(5)
 {
     pipe0_reading_address[0] = 0;
@@ -1086,15 +1112,19 @@ uint8_t RF24_forked::getDynamicPayloadSize(void) {
 #if defined(RF24_LINUX)
     spi_txbuff[0] = R_RX_PL_WID;
     spi_rxbuff[1] = 0xff;
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     _SPI.transfernb((char*)spi_txbuff, (char*)spi_rxbuff, 2);
     result = spi_rxbuff[1];
     endTransaction();
+    transactionGuard.release();
 #else
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     _SPI.transfer(R_RX_PL_WID);
     result = _SPI.transfer(0xff);
     endTransaction();
+    transactionGuard.release();
 #endif
 
     if (result > 32) {
@@ -1260,10 +1290,12 @@ void RF24_forked::closeReadingPipe(uint8_t pipe) {
 /****************************************************************************/
 
 void RF24_forked::toggle_features(void) {
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     _SPI.transfer(ACTIVATE);
     _SPI.transfer(0x73);
     endTransaction();
+    transactionGuard.release();
 }
 
 /****************************************************************************/
@@ -1347,6 +1379,7 @@ void RF24_forked::writeAckPayload(uint8_t pipe, const void* buf, uint8_t len) {
     uint8_t data_len = rf24_min(len, 32);
 
 #if defined(RF24_LINUX)
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     uint8_t* ptx = spi_txbuff;
     uint8_t size = data_len + 1;  // Add register value to transmit buffer
@@ -1357,12 +1390,15 @@ void RF24_forked::writeAckPayload(uint8_t pipe, const void* buf, uint8_t len) {
 
     _SPI.transfern((char*)spi_txbuff, size);
     endTransaction();
+    transactionGuard.release();
 #else
+    Yokis::RadioCritical transactionGuard;
     beginTransaction();
     _SPI.transfer(W_ACK_PAYLOAD | (pipe & 0x07));
 
     while (data_len--) _SPI.transfer(*current++);
     endTransaction();
+    transactionGuard.release();
 
 #endif
 }

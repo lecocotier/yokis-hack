@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "tools" / "build_provenance.py"
@@ -54,6 +55,20 @@ class BuildProvenanceTests(unittest.TestCase):
     def test_exact_source_byte_change_changes_fingerprint(self):
         before = self.identity()["source_sha256"]
         (self.root / "src/main.cpp").write_bytes(b"int main() { return 1; }\r\n")
+        self.assertNotEqual(before, self.identity()["source_sha256"])
+
+    def test_line_endings_are_exact_bytes_not_normalized(self):
+        before = self.identity()["source_sha256"]
+        (self.root / "src/main.cpp").write_bytes(self.PUBLIC_FILES["src/main.cpp"].replace(b"\n", b"\r\n"))
+        after = self.identity()
+        self.assertNotEqual(before, after["source_sha256"])
+        self.assertIn("no line-ending normalization", after["byte_policy"])
+
+    def test_public_local_library_bytes_are_inputs(self):
+        before = self.identity()["source_sha256"]
+        library = self.root / "lib/RF24_forked/RF24.cpp"
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"// local driver bytes\n")
         self.assertNotEqual(before, self.identity()["source_sha256"])
 
     def test_platformio_and_build_script_bytes_are_inputs(self):
@@ -166,6 +181,87 @@ class BuildProvenanceTests(unittest.TestCase):
         builddir.mkdir(parents=True)
         with self.assertRaises(ValueError):
             provenance.write_receipt(self.root, builddir, self.identity(), [outside], "native")
+
+    def test_receipt_rejects_source_changed_after_build_identity(self):
+        identity = self.identity()
+        builddir = self.root / ".pio/build/native"
+        builddir.mkdir(parents=True)
+        binary = builddir / "firmware.bin"
+        binary.write_bytes(b"binary from earlier source")
+        (self.root / "src/main.cpp").write_bytes(b"changed after header generation\n")
+        with self.assertRaisesRegex(RuntimeError, "changed during the build"):
+            provenance.write_receipt(self.root, builddir, identity, [binary], "native")
+        self.assertFalse((builddir / "build-receipt.json").exists())
+
+    def test_git_identity_keeps_full_revision_and_dirty_state_without_paths(self):
+        revision = "0123456789abcdef0123456789abcdef01234567"
+        outputs = [
+            provenance.subprocess.CompletedProcess([], 0, revision + "\n"),
+            provenance.subprocess.CompletedProcess([], 0, " M include/private_config.h\n"),
+        ]
+        with mock.patch.object(provenance.subprocess, "run", side_effect=outputs) as run:
+            identity = self.identity()
+        self.assertEqual(identity["git_revision"], revision)
+        self.assertIs(identity["git_dirty"], True)
+        self.assertNotIn("private_config.h", json.dumps(identity))
+        for call in run.call_args_list:
+            self.assertIsInstance(call.args[0], list)
+            self.assertFalse(call.kwargs.get("shell", False))
+
+    def test_avr_metadata_uses_its_framework_and_hex_receipt(self):
+        avr = self.root / ".pio/packages/framework-arduino-avr"
+        avr.mkdir(parents=True)
+        (avr / "package.json").write_text('{"name":"framework-arduino-avr","version":"5.4.0"}')
+        class Platform:
+            def get_dir(inner): return self.root / ".pio/platforms/atmelavr"
+            def get_package_dir(inner, name):
+                if name != "framework-arduino-avr": raise KeyError(name)
+                return avr
+        class Environment:
+            def PioPlatform(inner): return Platform()
+            def subst(inner, value): return value
+        metadata = provenance._collect_metadata(Environment(), self.root, "megaatmega2560")
+        self.assertEqual(metadata["framework"]["name"], "framework-arduino-avr")
+        build = self.root / ".pio/build/megaatmega2560"; build.mkdir(parents=True)
+        hexfile = build / "firmware.hex"; hexfile.write_bytes(b":00000001FF\n")
+        receipt = provenance.write_receipt(self.root, build, self.identity(), [hexfile], "megaatmega2560", metadata)
+        self.assertEqual(json.loads(receipt.read_text())["artifacts"][0]["name"], "firmware.hex")
+
+    def test_platformio_hooks_do_not_include_stale_bin_in_elf_receipt(self):
+        root = self.root
+
+        class FakeEnvironment(dict):
+            def __init__(self):
+                super().__init__(PIOENV="native")
+                self.actions = {}
+
+            def subst(self, value):
+                return {
+                    "$PROJECT_DIR": str(root),
+                    "$BUILD_DIR": str(root / ".pio/build/native"),
+                    "$PROGNAME": "",  # PlatformIO pre scripts run before this default exists.
+                    "$CXX": "$CXX",
+                    "$PROJECT_LIBDEPS_DIR": str(root / ".pio/libdeps"),
+                }.get(value, value)
+
+            def AddPostAction(self, target, action):
+                self.actions[target] = action
+
+        environment = FakeEnvironment()
+        provenance._configure_platformio(environment)
+        self.assertIn("YOKIS_BUILD_ID", (root / "include/build_provenance.h").read_text())
+        builddir = root / ".pio/build/native"
+        builddir.mkdir(parents=True)
+        (builddir / "firmware.elf").write_bytes(b"new ELF")
+        (builddir / "firmware.bin").write_bytes(b"stale BIN")
+        environment.actions["$BUILD_DIR/${PROGNAME}.elf"]([], [builddir / "firmware.elf"], environment)
+        receipt = json.loads((builddir / "build-receipt.json").read_text())
+        self.assertEqual([item["name"] for item in receipt["artifacts"]], ["firmware.elf"])
+        (builddir / "firmware.bin").write_bytes(b"new BIN")
+        environment.actions["$BUILD_DIR/${PROGNAME}.bin"]([], [builddir / "firmware.bin"], environment)
+        receipt = json.loads((builddir / "build-receipt.json").read_text())
+        self.assertEqual([item["name"] for item in receipt["artifacts"]], ["firmware.bin", "firmware.elf"])
+        self.assertEqual(receipt["artifacts"][0]["sha256"], hashlib.sha256(b"new BIN").hexdigest())
 
 
 if __name__ == "__main__":

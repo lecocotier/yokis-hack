@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-// CE  active low controls when chips actually executes stuff (sends a payload
+// CE active high controls when the chip receives or starts transmitting (sends a payload
 // for instance)
 // CSN active low controls when commands are sent to the chip (write register,
 // etc.)

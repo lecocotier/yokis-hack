@@ -12,6 +12,7 @@
 #define LOG Serial
 inline bool consoleInputPending(){return Serial.available()!=0;}
 #define SERIAL_BAUDRATE 115200
+#define IRQ_PIN 1
 #define CURRENT_DEVICE_DEFAULT_NAME "tempDevice"
 #define PROG_TITLE_FORMAT "Yokis %s"
 #define PROG_VERSION "test"

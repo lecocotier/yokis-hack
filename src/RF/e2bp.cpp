@@ -1,4 +1,5 @@
 #include "RF/e2bp.h"
+#include "RF/irqManager.h"
 #include "globals.h"
 #include "utils.h"
 #include "reliability.h"
@@ -447,6 +448,7 @@ bool E2bp::runMainLoop() {
     ce(LOW);
     // while not interrupted by RX, timeout or by device mode
     while (loopContinue && !Yokis::elapsed(millis(), start, MAIN_LOOP_TIMEOUT_MILLIS)) {
+        IrqManager::servicePending();
         if (available()) break; // handle data even if an IRQ edge was missed
         if (txCycles < 65535) ++txCycles;
         write_register(NRF_CONFIG, 0b00001110);  // PTX
@@ -554,11 +556,10 @@ IRAM_ATTR
 #endif
 void E2bp::interruptTxOk() {
     // The immediate TX->RX switch is retained from the captured protocol.
-    // No logging here. Its SPI callees still require IRAM/reentrancy hardening;
-    // adding IRAM_ATTR to this function alone does not make the path safe.
-    write_register(NRF_CONFIG, 0b00001111);  // PRX
-    ce(HIGH);
-    write_register(NRF_STATUS, 0b01110000);  // Reset interrupts
+    // Only the dedicated IRAM transport may be called from this path.
+    if (!irqWriteRegister(NRF_CONFIG, 0b00001111)) { stopMainLoop(); return; } // PRX
+    irqCe(HIGH);
+    if (!irqWriteRegister(NRF_STATUS, 0b01110000)) stopMainLoop(); // Reset interrupts
 }
 
 #if defined(ESP8266)

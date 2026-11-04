@@ -16,6 +16,7 @@
 # Machine- and installation-specific settings. Never commit credentials.
 /platformio.local.ini
 /include/local_secrets.h
+/include/build_provenance.h
 /local/
 /.tools/
 __pycache__/

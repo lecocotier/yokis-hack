@@ -95,7 +95,8 @@ inline void noInterrupts(){}
 inline void interrupts(){}
 inline void pinMode(int,int){}
 inline void digitalWrite(int,int){}
-inline int digitalRead(int){return HIGH;}
+inline int& testIrqPin(){static int value=HIGH;return value;}
+inline int digitalRead(int){return testIrqPin();}
 inline int digitalPinToInterrupt(int p){return p;}
 inline void attachInterrupt(int,void(*)(),int){}
 inline void detachInterrupt(int){}

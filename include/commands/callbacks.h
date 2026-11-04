@@ -17,6 +17,7 @@
 #include "net/wifi.h"
 
 void registerAllCallbacks();
+bool versionCallback(const char*);
 
 bool changeDeviceState(const char*, bool (E2bp::*)(void));
 

@@ -20,6 +20,7 @@
 
 #include "RF/legacyTypes.h"
 #include <RF24_config.h>
+#include "RF/irqTransport.h"
 
 #if defined(RF24_LINUX) || defined(LITTLEWIRE)
 #include "utility/includes.h"
@@ -63,6 +64,7 @@ class RF24_forked {
     uint8_t addr_width; /**< The address width to use - 3,4 or 5 bytes. */
 
    protected:
+    RadioIrqTransport irqTransport_;
     /**
      * SPI transactions
      *
@@ -74,6 +76,11 @@ class RF24_forked {
     inline void endTransaction();
 
    public:
+    // Kept inline so ISR callers never enter the legacy flash driver.
+    __attribute__((always_inline)) uint8_t irqStatusAndClear() { return irqTransport_.statusAndClear(); }
+    __attribute__((always_inline)) bool irqWriteRegister(uint8_t reg, uint8_t value) { return irqTransport_.writeRegister(reg, value); }
+    __attribute__((always_inline)) bool irqReadPayload(uint8_t* output, uint8_t length) { return irqTransport_.readPayload(output, length); }
+    __attribute__((always_inline)) void irqCe(bool high) { irqTransport_.ce(high); }
     /**
      * @name Primary public interface
      *

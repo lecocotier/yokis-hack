@@ -2,6 +2,7 @@
 #include "serial/displayConfigCallback.h"
 #include "serial/flagCallback.h"
 #include "serial/usageCallback.h"
+#include "buildIdentity.h"
 
 // One bounded line buffer serves serial and Telnet. Keep overflow sticky until
 // the line ending: executing the tail as another command could act on a device.
@@ -92,6 +93,7 @@ void SerialHelper::usage() {
     char buf[64];
     snprintf(buf, sizeof(buf), PROG_TITLE_FORMAT, PROG_VERSION);
     LOG.println(buf);
+    LOG.print("Build: "); LOG.println(YOKIS_BUILD_ID);
     LOG.println();
 
     for (uint8_t i = 0; i < callbacksIndex; i++) {

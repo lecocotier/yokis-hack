@@ -42,6 +42,7 @@ void authorizeAdmin(AsyncWebServerRequest& r){r.authUser=YOKIS_HTTP_USER;r.authP
 #include "failure_cases.h"
 #include "hold_cases.h"
 #include "security_cases.h"
+#include "irq_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -261,6 +262,9 @@ int main(){
  for(int i=1;i<64;++i){g_devices[i]=d;}CHECK(displayDevices(nullptr));for(int i=1;i<64;++i){g_devices[i]=nullptr;}
 
  testAdminSecurity();
+ testIrqDispatch();
+ Serial.out.clear();CHECK(versionCallback("version"));CHECK(Serial.out.find("Build: native-test")!=std::string::npos);
+ CHECK(!versionCallback("version extra"));
  testFailureRecovery(d);
  testCooperativeHold(d, wifi);
  testPostStopPolling(d, wifi);

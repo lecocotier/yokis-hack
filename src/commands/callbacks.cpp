@@ -2,6 +2,7 @@
 
 #include "globals.h"
 #include "reliability.h"
+#include "buildIdentity.h"
 
 namespace {
 void finishActiveHold() {
@@ -22,6 +23,7 @@ void resumeDeviceRadio() {
 // Serial and Telnet share the same validated command handlers. Callbacks run
 // from the main loop; only the selected RF helper may own the physical NRF.
 void registerAllCallbacks() {
+    g_serial->registerCallback(new GenericCallback("version", "Display firmware public source identity", versionCallback));
     // Serial setup
     g_serial->registerCallback(new GenericCallback(
         "pair",
@@ -121,6 +123,16 @@ void registerAllCallbacks() {
 #endif // MQTT_ENABLED
 
 #endif // ESP8266
+}
+
+bool versionCallback(const char* params) {
+    Yokis::Arguments args(params);
+    if (!args.valid || args.count != 1) return false;
+    LOG.print("Build: "); LOG.println(YOKIS_BUILD_ID);
+    LOG.print("Git: "); LOG.println(YOKIS_BUILD_GIT_REVISION);
+    LOG.print("Public source SHA256: "); LOG.println(YOKIS_BUILD_SOURCE_SHA256);
+    LOG.println("Private configuration excluded; compare with the local build receipt.");
+    return true;
 }
 
 bool pairingCallback(const char*) {

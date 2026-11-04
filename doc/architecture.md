@@ -14,6 +14,7 @@ Ce firmware relie une console série/Telnet et MQTT à un unique NRF24. Le code 
 | `include/RF/shutterFeedback.h` | Interprétation des retours avec un historique propre à chaque volet. |
 | `include/RF/stopVerification.h`, `src/postStopPolling.cpp` | Vérification différée et bornée après STOP, sans nouveau STOP automatique. |
 | `src/RF/irqManager.cpp`, `src/RF/RF24_forked.cpp` | Routage de l'interruption et accès SPI bas niveau. |
+| `src/RF/irqTransport.cpp`, `include/RF/radioCritical.h` | Transport IRQ en RAM et exclusion courte sauvegardant l'état des interruptions. |
 | `src/RF/pairing.cpp`, `copy.cpp`, `scanner.cpp` | Modes spéciaux partageant le même NRF. |
 | `src/net/mqtt.cpp` | Transport MQTT, reconnexion, abonnements et disponibilité de passerelle. |
 | `src/net/mqttHass.cpp` | Decouverte Home Assistant et republication progressive des états mémorisés. |
@@ -21,6 +22,8 @@ Ce firmware relie une console série/Telnet et MQTT à un unique NRF24. Le code 
 | `src/net/webserver.cpp` | Validation HTTP puis mise en attente d'une configuration appliquée depuis la boucle. |
 | `src/net/mqttConfig.cpp`, `src/storage/yokisLittleFS.cpp` | Persistance MQTT et montage LittleFS sans formatage automatique. |
 | `src/serial/serialHelper.cpp` | Lecture de lignes bornée, traitement LF/CRLF et rejet de toute ligne débordante. |
+| `src/serial/adminConsole.cpp` | Authentification TCP, assemblage séparé des lignes USB/TCP et limitation des entrées/sorties. |
+| `tools/build_provenance.py` | Identité des sources publiques et reçus associant ces sources aux binaires produits. |
 
 ## Les informations à ne pas confondre
 
@@ -42,16 +45,34 @@ La bascule TX/RX, les écritures directes de registres et les délais dans `E2bp
 
 Une interruption indique qu'il faut examiner le NRF. Seul un contenu réel dans la FIFO permet de déclarer une réponse reçue. Les octets anciens sont purgés avant un nouvel échange; la réutilisation TX est arrêtée à la fin.
 
+L'ISR utilise des appels qualifiés sans dispatch virtuel et un transport dédié
+dans la RAM d'instructions. Ce transport conserve la bascule immédiate TX/RX et
+les paquets d'appairage de trois puis cinq octets. L'appairage ne réécrit dans
+l'ISR que la largeur du prochain paquet. Les transactions SPI principales
+masquent les interruptions avant CSN bas et restaurent exactement leur état
+après CSN haut ; les délais d'attente radio restent hors de cette protection.
+Une broche IRQ encore basse est resservie hors interruption après un front
+manqué ou un délai SPI dépassé. Un paquet lu en erreur n'est pas accepté comme
+un appairage valide.
+
 ## Ordre des travaux dans la boucle
 
-1. Traiter Telnet, une configuration HTTP en attente et OTA.
+1. Reprendre une IRQ encore basse, puis traiter la console, une configuration HTTP en attente et OTA.
 2. Expirer les contrôles STOP devenus trop anciens, sans transaction RF.
 3. Consommer un paquet MQTT.
 4. Autoriser une étape de découverte/republication seulement si aucune entrée ni vérification STOP prioritaire n'attend.
 5. Si les conditions le permettent, effectuer un contrôle post-STOP, sinon au plus un polling ordinaire.
-6. Servir le scanner et lire une quantité bornée de console, puis rendre la main au cœur ESP8266.
+6. Servir le scanner et lire une quantité bornée de console.
+7. Si aucune commande ou vérification STOP ne l'empêche, servir une étape de
+   maintien de variateur, puis rendre la main au cœur ESP8266.
 
-Ce sont des priorités coopératives. Une commande radio ou une reconnexion déjà engagée n'est pas interrompue par un nouveau STOP. La fonction `pressFor` peut notamment occuper la boucle longtemps; `yield()` entretient le cœur réseau, mais ne remplace pas les appels applicatifs à MQTT et OTA.
+Ce sont des priorités coopératives. Un échange radio ou une reconnexion déjà
+engagés ne sont pas interrompus par un nouveau STOP. `pressFor` accepte un
+maintien et rend la main après le premier échange ; les impulsions suivantes et
+la libération sont traitées une étape à la fois. Une nouvelle commande annule
+le maintien et conserve la priorité du STOP et de sa vérification. Les échanges
+RF individuels restent synchrones ; cela ne constitue pas une garantie de
+latence maximale.
 
 La campagne post-STOP attend au moins 100 ms après la commande, espace les essais suivants de 250 ms, limite les essais à trois et expire après 5000 ms. Ce sont des paramètres logiciels de vérification, pas des garanties de temps réel ni une mesure de course moteur.
 
@@ -79,4 +100,9 @@ Le Wi-Fi enregistre en flash les identifiants volontairement changés. Une absen
 
 Les tests natifs compilent les implémentations de production avec des interfaces simulées pour la radio, le temps, le stockage et le réseau. Ils vérifient des chemins logiciels, pas les chronogrammes SPI, les réceptions réelles ou tous les chemins IRAM.
 
-Le pilote SPI appelé depuis l'ISR présente encore des points ouverts de placement en flash et de réentrance. L'interface Web, Telnet et OTA conservent aussi des limites de protection réseau. Les commentaires de cette passe ne constituent pas une correction de ces comportements: les preuves et les priorités sont dans [l'audit du 4 novembre 2026](audit-2026-11-04.md).
+Le contrôle du binaire lié suit les appels, sauts indirects résolus et littéraux
+de l'ISR ; les pointeurs d'objets à l'exécution et les chronogrammes matériels
+restent des hypothèses à vérifier sur carte. La configuration de l'administration
+est décrite dans [administration locale](administration-locale.md), et les limites
+de l'identification dans [provenance des builds](build-provenance.md). L'état des
+correctifs et les preuves sont dans [l'audit](audit-2026-11-04.md).

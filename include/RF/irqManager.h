@@ -11,6 +11,9 @@ class IrqManager {
    public:
     static volatile IrqType irqType;
     static void processIRQ();
+    // Foreground recovery for an IRQ still held low after a missed edge or a
+    // bounded ISR bus timeout. Never call from inside a CSN transaction.
+    static void servicePending();
 };
 
 #endif  // __IRQ_MANAGER_H__

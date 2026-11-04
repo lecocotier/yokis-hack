@@ -1,4 +1,5 @@
 #include "RF/pairing.h"
+#include "RF/irqManager.h"
 #include <Arduino.h>
 #include "globals.h"
 #include "reliability.h"
@@ -16,6 +17,7 @@ void Pairing::reset() {
     this->recvBufferAddr = this->recvBuffer;
     memset(this->recvBuffer, 0, 8);
     this->readsCount = 0;
+    this->irqFailed = false;
 
 }
 
@@ -41,14 +43,15 @@ bool Pairing::hackPairing() {
     LOG.print("Waiting... timeout=");
     LOG.println(HACK_TIMEOUT);
 
-    while (readsCount < 2) {
+    while (readsCount < 2 && !irqFailed) {
+        IrqManager::servicePending();
         if (readsCount && !firstReceived) { firstReceived = true; phaseStart = millis(); }
         if (Yokis::elapsed(millis(), phaseStart, firstReceived ? 1000 : HACK_TIMEOUT)) break;
         delay(10);
     }
     ce(LOW);
 
-    if (readsCount >= 2) {
+    if (readsCount >= 2 && !irqFailed) {
         _debugPrintRecv(recvBuffer, 3);
         _debugPrintRecv(recvBuffer + 3, 5);
         printPairingInfo();
@@ -70,9 +73,6 @@ void Pairing::setupRFModule() {
     delay(5);
 }
 
-#if defined(ESP8266)
-IRAM_ATTR
-#endif
 void Pairing::prepareForReading(uint8_t payloadSize) {
     setPayloadSize(payloadSize);
     openReadingPipe(PAIRING_PIPE_NUM, Pairing::pairingAddress);
@@ -87,11 +87,16 @@ void Pairing::interruptTxOk() {}
 IRAM_ATTR
 #endif
 void Pairing::interruptRxReady() {
-    if (readsCount >= 2 || !available()) return;
+    if (readsCount >= 2) return;
     uint8_t count = readsCount;
-    read(recvBuffer + (count ? 3 : 0), count ? 5 : 3);
-    if (!count) prepareForReading(5); // timing-critical, no logging here
-    else ce(LOW);
+    if (!irqReadPayload(recvBuffer + (count ? 3 : 0), count ? 5 : 3)) { irqFailed = true; return; }
+    // Address/CRC/channel remain configured. Rearm only the next pipe width;
+    // keep CE high across the first packet as in the captured pairing exchange.
+    if (!count) {
+        if (!irqWriteRegister(RX_PW_P0, 5)) { irqFailed = true; return; }
+    }
+    else irqCe(LOW);
+    __asm__ __volatile__("" ::: "memory");
     readsCount = count + 1; // publish only after the bytes are stored
 }
 #if defined(ESP8266)

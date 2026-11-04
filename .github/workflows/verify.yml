@@ -31,6 +31,11 @@ jobs:
         # The ESP8266 builder validates an OTA destination even for build-only.
         # Loopback is a CI-only placeholder. No upload target is ever invoked.
         run: pio run -e d1_mini -e d1_mini_ota -e megaatmega2560 --upload-port 127.0.0.1
+      - name: Check linked radio IRQ code and literals
+        run: |
+          for target in d1_mini d1_mini_ota; do
+            python3 tools/check_irq_iram.py --elf .pio/build/$target/firmware.elf --objdump "$HOME/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-objdump" --report .pio/build/$target/irq-iram-report.json
+          done
       - name: Keep firmware build outputs
         if: success()
         uses: actions/upload-artifact@v4
@@ -40,6 +45,8 @@ jobs:
             .pio/build/d1_mini/firmware.bin
             .pio/build/d1_mini_ota/firmware.bin
             .pio/build/megaatmega2560/firmware.hex
+            .pio/build/*/build-receipt.json
+            .pio/build/*/irq-iram-report.json
           retention-days: 14
 
   native-windows:

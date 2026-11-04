@@ -8,6 +8,8 @@ struct RadioFixture {
  bool connected=true;uint8_t config=0,payloadSize=9;unsigned writes=0,txCycles=0;
  std::deque<std::vector<uint8_t>> replies;
  std::vector<uint8_t> fifo,lastPayload;bool pending=false,active=false;
+ uint8_t irqStatus=0;std::vector<std::string> irqEvents;
+ bool irqFailsOnce=false,irqReadFails=false;
 };
 extern RadioFixture testRadio;
 class RF24_forked {
@@ -30,6 +32,10 @@ public:
  void printDetails(){}
  void powerDown(){testRadio.active=false;}
  void whatHappened(bool&tx,bool&fail,bool&rx){tx=fail=false;rx=available();}
+ uint8_t irqStatusAndClear(){testRadio.irqEvents.push_back("status");if(testRadio.irqFailsOnce){testRadio.irqFailsOnce=false;return 0;}auto s=uint8_t(testRadio.irqStatus|get_status());testRadio.irqStatus=0;testIrqPin()=HIGH;return s;}
+ bool irqWriteRegister(uint8_t r,uint8_t v){testRadio.irqEvents.push_back("reg:"+std::to_string(r)+":"+std::to_string(v));write_register(r,v);if(r==0x11)setPayloadSize(v);return true;}
+ bool irqReadPayload(uint8_t* output,uint8_t n){testRadio.irqEvents.push_back("read:"+std::to_string(n));if(testRadio.irqReadFails)return false;read(output,n);return true;}
+ void irqCe(bool high){testRadio.irqEvents.push_back(high?"ce:1":"ce:0");ce(high);}
  void maskIRQ(bool,bool,bool){}
  void setCRCLength(rf24_crclength_e){}
  void setPALevel(rf24_pa_dbm_e){}

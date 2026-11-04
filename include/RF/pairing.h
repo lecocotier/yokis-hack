@@ -15,6 +15,7 @@
 class Pairing : public RFConfigurator {
    private:
     volatile uint8_t readsCount;
+    volatile bool irqFailed;
     void _printPairingInfoRaw();
     void _printPairingInfoFormat();
 
