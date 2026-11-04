@@ -36,10 +36,12 @@ std::string published(const char* topic) {
  return "";
 }
 void pollReply(Device* d,uint8_t a,uint8_t b){testRadio.replies.push_back({a,b});pollForStatus(d);}
+void authorizeAdmin(AsyncWebServerRequest& r){r.authUser=YOKIS_HTTP_USER;r.authPassword=YOKIS_HTTP_PASSWORD;r.bodyParams["csrf_token"]=AsyncWebParameter(WebServer::processor("CSRF_TOKEN").c_str());}
 #include "poststop_cases.h"
 #include "network_cases.h"
 #include "failure_cases.h"
 #include "hold_cases.h"
+#include "security_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -48,6 +50,7 @@ int main(){
  testFs.failMount=false;
  WiFiClient wifi;
  g_mqtt=new MqttHass(wifi);g_bp=new E2bp(1,2);
+ webserver.begin();
  g_pairingRF=new Pairing(1,2);g_scanner=new Scanner(1,2);g_copy=new Copy(1,2);
  g_serial=new SerialHelper();registerAllCallbacks();g_currentDevice=new Device("tempDevice");
  g_devices[0]=new Device("volet",address,47);
@@ -238,10 +241,10 @@ int main(){
  // A partial HTTP MQTT change preserves every omitted field; invalid requests
  // queue nothing. Production handler and deferred apply are both executed.
  CHECK(g_mqtt->setConnectionInfo("keep-host",1883,"keep-user","keep-pass",false));
- AsyncWebServerRequest r;r.params["mqtt_port"]=AsyncWebParameter("1884");webserver.handlers["/save_config"](&r);CHECK(r.status==202);
+ AsyncWebServerRequest r;authorizeAdmin(r);r.bodyParams["mqtt_port"]=AsyncWebParameter("1884");webserver.dispatch("/save_config",HTTP_POST,&r);CHECK(r.status==202);
  testClockUs+=200000;webserver.processPending();CHECK(std::string(g_mqtt->getHost())=="keep-host");CHECK(g_mqtt->getPort()==1884);
  CHECK(std::string(g_mqtt->getUsername())=="keep-user");CHECK(std::string(g_mqtt->getPassword())=="keep-pass");
- for(auto port:{"abc","0","99999","-1"}){AsyncWebServerRequest bad;bad.params["mqtt_port"]=AsyncWebParameter(port);webserver.handlers["/save_config"](&bad);CHECK(bad.status==400);}
+ for(auto port:{"abc","0","99999","-1"}){AsyncWebServerRequest bad;authorizeAdmin(bad);bad.bodyParams["mqtt_port"]=AsyncWebParameter(port);webserver.dispatch("/save_config",HTTP_POST,&bad);CHECK(bad.status==400);}
  CHECK(g_mqtt->getPort()==1884);
 
  // CLI: malformed arguments have no effects, LF/CRLF and overlong lines do
@@ -257,6 +260,7 @@ int main(){
  // Full table used by dConfig must be bounded, with no sentinel past slot 63.
  for(int i=1;i<64;++i){g_devices[i]=d;}CHECK(displayDevices(nullptr));for(int i=1;i<64;++i){g_devices[i]=nullptr;}
 
+ testAdminSecurity();
  testFailureRecovery(d);
  testCooperativeHold(d, wifi);
  testPostStopPolling(d, wifi);

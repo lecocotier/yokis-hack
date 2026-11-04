@@ -32,7 +32,8 @@ char* MqttConfig::getPassword() { return password; }
 bool MqttConfig::isEmpty() { return !host[0]; }
 void MqttConfig::printDebug(Print& p) {
     p.print("Host: "); p.println(host); p.print("Port: "); p.println(port);
-    p.print("Username: "); p.println(username); p.print("Password: "); p.println(password);
+    p.print("Username: "); p.println(username);
+    p.print("Password configured: "); p.println(password[0] ? "yes" : "no");
 }
 bool MqttConfig::saveToLittleFS() {
     // Match Arduino println's CRLF byte count and check write errors before

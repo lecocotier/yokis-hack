@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "adminConfig.h"
 #include "RF/device.h"
 #include "RF/e2bp.h"
 #include "RF/pairing.h"
@@ -9,6 +10,7 @@
 #include "serial/serialHelper.h"
 #include <Ticker.h>
 #define LOG Serial
+inline bool consoleInputPending(){return Serial.available()!=0;}
 #define SERIAL_BAUDRATE 115200
 #define CURRENT_DEVICE_DEFAULT_NAME "tempDevice"
 #define PROG_TITLE_FORMAT "Yokis %s"
@@ -41,7 +43,7 @@ extern Device* g_currentDevice;
 extern MqttHass* g_mqtt;
 extern SerialHelper* g_serial;
 #include "net/webserver.h"
-struct FakeOTA{unsigned handleCalls=0;void handle(){++handleCalls;}};
+struct FakeOTA{unsigned handleCalls=0,beginCalls=0;std::string password;void handle(){++handleCalls;}void setPassword(const char*p){password=p;}void begin(){++beginCalls;}};
 extern FakeOTA ArduinoOTA;
 extern WebServer webserver;
 void loop();

@@ -2,9 +2,11 @@
 #define __GLOBALS_H__
 
 #include <Arduino.h>
+#include "adminConfig.h"
 
 #ifdef ESP8266
 #include <Ticker.h>
+#include "serial/adminConsole.h"
 #endif  // ESP8266
 
 #include "RF/copy.h"
@@ -96,7 +98,7 @@ extern MqttHass* g_mqtt;
 #endif // MQTT_ENABLED
 
 // Serial configuration over telnet
-extern TelnetSpy g_telnetAndSerial;
+extern AdminConsole g_telnetAndSerial;
 #define LOG g_telnetAndSerial
 
 #else // ESP8266
@@ -121,5 +123,13 @@ extern TelnetSpy g_telnetAndSerial;
 #ifdef __cplusplus
 }  // extern "C"
 #endif
+
+inline bool consoleInputPending() {
+#ifdef ESP8266
+    return LOG.inputPending();
+#else
+    return Serial.available() != 0;
+#endif
+}
 
 #endif  // __GLOBALS_H__

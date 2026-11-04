@@ -43,7 +43,7 @@ Device* g_currentDevice;
 #ifdef MQTT_ENABLED
 MqttHass* g_mqtt;
 #endif // MQTT_ENABLED
-TelnetSpy g_telnetAndSerial;
+AdminConsole g_telnetAndSerial;
 // no need to store more devices than supported by MQTT
 Device* g_devices[MQTT_MAX_NUM_OF_YOKIS_DEVICES];
 #endif // ESP8266
@@ -107,8 +107,9 @@ void setup() {
     #endif
 
     // Report a deliberate gateway shutdown before OTA disconnects networking.
-    // This build does not configure OTA authentication; see the audit report.
+    // Authentication is configured below from the ignored local secret header.
     ArduinoOTA.onStart([]() {
+        if (g_bp && g_bp->holdActive()) { g_bp->cancelHold(); g_bp->serviceHold(); }
 #ifdef MQTT_ENABLED
         if (g_mqtt) g_mqtt->disconnect();
 #endif
@@ -122,7 +123,7 @@ void setup() {
     });
     ArduinoOTA.onEnd([]() { LOG.println("\nEnd"); });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        LOG.printf("Progress: %u%%\r", (progress / (total / 100)));
+        LOG.printf("Progress: %u%%\r", total ? unsigned((uint64_t(progress) * 100) / total) : 0);
     });
     ArduinoOTA.onError([](ota_error_t error) {
         LOG.printf("Error[%u]: ", error);
@@ -138,7 +139,8 @@ void setup() {
             LOG.println("End Failed");
         }
     });
-    ArduinoOTA.begin();
+    if (!Yokis::configureAdminOta(ArduinoOTA, YOKIS_OTA_PASSWORD))
+        LOG.println("OTA disabled: provision a local OTA password first");
 #endif
 
     // Registering all commands
@@ -159,7 +161,7 @@ void setup() {
 void loop() {
     bool automaticRadioWork = false;
 #if defined(ESP8266)
-    LOG.handle(); // telnetspy handling
+    LOG.handle(); // authenticate and assemble complete USB/network command lines
     webserver.processPending();
     ArduinoOTA.handle();
 
@@ -169,12 +171,12 @@ void loop() {
     expirePostStopChecks(); // deadline failure is metadata, never automatic RF
     g_mqtt->loop();
 
-    if (!g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available() &&
+    if (!g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !consoleInputPending() &&
         !postStopChecksPending()) g_mqtt->serviceRefresh(g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     // Drain already received commands before ANY automatic status query.
     // No recursive MQTT calls from the radio; special RF modes retain ownership.
     if (FLAG_IS_ENABLED(FLAG_POLLING) && IrqManager::irqType == E2BP &&
-        !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available()) {
+        !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !consoleInputPending()) {
         automaticRadioWork = servicePostStopPolling();
         if (!automaticRadioWork && !postStopChecksPending() && !g_bp->holdActive() &&
             g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
@@ -195,7 +197,7 @@ void loop() {
 #endif // ESP8266
     if (IrqManager::irqType == SCANNER) g_scanner->service();
     g_serial->readFromSerial();
-    bool canServiceHold = !automaticRadioWork && IrqManager::irqType == E2BP && !LOG.available();
+    bool canServiceHold = !automaticRadioWork && IrqManager::irqType == E2BP && !consoleInputPending();
 #if defined(ESP8266) && defined(MQTT_ENABLED)
     canServiceHold = canServiceHold && !g_mqtt->handledInput() &&
         !g_mqtt->hasPendingInput() && !postStopChecksPending();

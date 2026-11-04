@@ -6,6 +6,7 @@
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "net/wifi.h"
+#include "adminConfig.h"
 
 const char html_config_form[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -81,7 +82,8 @@ const char html_config_form[] PROGMEM = R"rawliteral(
                 var urlParams = new URLSearchParams(window.location.search);
                 var message = urlParams.get('message');
                 if(message != null && message != "" && message != "null") {
-                    document.getElementById("message").innerHTML = "<div class=\"alert success\"><span class=\"closebtn\" onclick=\"this.parentElement.style.display='none';\">&times;</span>" + message + "</div>";
+                    document.getElementById("message").textContent = message;
+                    document.getElementById("message").className = "alert success";
                 }
             }
         </script>
@@ -92,14 +94,16 @@ const char html_config_form[] PROGMEM = R"rawliteral(
         <div id="message"></div>
 
         <div>
-        <form action="/save_config">
+        <form action="/save_config" method="post">
+        <input type="hidden" name="csrf_token" value="%CSRF_TOKEN%">
 
         <h2>WiFi</h2>
         <label for="wifi_ssid">SSID:</label>
         <input %WIFI_SECTION_ENABLED% type="text" id="wifi_ssid" name="wifi_ssid" value="%WIFI_SSID%" placeholder="Enter your WiFi SSID">
 
         <label for="wifi_password">Password:</label>
-        <input %WIFI_SECTION_ENABLED% type="password" id="wifi_password" name="wifi_password" value="%WIFI_PASSWORD%" placeholder="Enter your WiFi password">
+        <input %WIFI_SECTION_ENABLED% type="password" id="wifi_password" name="wifi_password" value="" autocomplete="new-password" placeholder="Leave blank to keep the current password">
+        <label><input %WIFI_SECTION_ENABLED% type="checkbox" name="wifi_password_clear" value="1">Clear WiFi password</label>
 
         <h2>MQTT</h2>
         <label for="mqtt_ip">IP:</label>
@@ -112,7 +116,8 @@ const char html_config_form[] PROGMEM = R"rawliteral(
         <input %MQTT_SECTION_ENABLED% type="text" id="mqtt_username" name="mqtt_username" value="%MQTT_USERNAME%" placeholder="Username to connect to MQTT">
 
         <label for="mqtt_password">Password:</label>
-        <input %MQTT_SECTION_ENABLED% type="password" id="mqtt_password" name="mqtt_password" value="%MQTT_PASSWORD%" placeholder="Password to connect to MQTT">
+        <input %MQTT_SECTION_ENABLED% type="password" id="mqtt_password" name="mqtt_password" value="" autocomplete="new-password" placeholder="Leave blank to keep the current password">
+        <label><input %MQTT_SECTION_ENABLED% type="checkbox" name="mqtt_password_clear" value="1">Clear MQTT password</label>
 
         <input type="submit" value="Save configuration">
 
@@ -123,11 +128,17 @@ const char html_config_form[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 class WebServer : public AsyncWebServer {
+   private:
+    const char* username_;
+    const char* password_;
+    bool authorize(AsyncWebServerRequest*) const;
    public:
     String StatusMessage;
 
-    WebServer(uint16_t port);
+    WebServer(uint16_t port, const char* username = YOKIS_HTTP_USER,
+              const char* password = YOKIS_HTTP_PASSWORD);
     ~WebServer();
+    void begin();
     void processPending();
     static String processor(const String& var);
 };

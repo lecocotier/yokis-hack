@@ -33,6 +33,8 @@ def main() -> int:
     flags = ["-std=c++11", "-fno-exceptions", "-g", os.environ.get("HOST_OPTIMIZATION", "-O0"),
              "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-Wno-ignored-qualifiers",
              "-DESP8266", "-DMQTT_ENABLED", "-DYOKIS_NATIVE_TEST", "-DMQTT_MAX_PACKET_SIZE=1024",
+             '-DYOKIS_HTTP_PASSWORD="native-http-secret-value"', '-DYOKIS_TELNET_PASSWORD="native-console-secret-value"',
+             '-DYOKIS_OTA_PASSWORD="native-ota-secret-value"', '-DYOKIS_AP_PASSWORD="native-ap-secret-value"',
              "-Itests/host", "-Iinclude"]
     sanitize = args.sanitizers == "on" or (args.sanitizers == "auto" and not windows)
     if sanitize:
@@ -49,6 +51,10 @@ def main() -> int:
     print("Instrumentation:", "ASan + UBSan + leaks" if sanitize else "none (Windows portable GCC)", flush=True)
     subprocess.run([compiler, *flags, *sources, "-o", str(binary)], cwd=ROOT, env=env, check=True)
     subprocess.run([str(binary)], cwd=ROOT, env=env, check=True)
+    console = build / ("admin-console.exe" if windows else "admin-console")
+    subprocess.run([compiler, *flags, "tests/test_admin_console.cpp", "src/serial/adminConsole.cpp",
+                    "-o", str(console)], cwd=ROOT, env=env, check=True)
+    subprocess.run([str(console)], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, "tests/check_mqtt_json.py"], cwd=ROOT, env=env, check=True)
     return 0
 

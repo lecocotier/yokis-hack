@@ -64,14 +64,18 @@ void setupWifi() {
     setupWifiAP();
 }
 
-void setupWifiAP() {
+void setupWifiAP(const char* password) {
+    if (!Yokis::validAdminSecret(password)) {
+        LOG.println("WiFi AP disabled: provision a local AP password first");
+        return;
+    }
     disconnectMqtt();
     WiFi.persistent(false);
     WiFi.disconnect(false, false); // keep station credentials in RAM and SDK flash
     WiFi.mode(WIFI_AP);
     String ssid = "YokisHack-";
     ssid += String(ESP.getFlashChipId(), HEX);
-    WiFi.softAP(ssid, "");
+    WiFi.softAP(ssid, password);
     LOG.print("WiFi AP mode started. SSID: "); LOG.println(ssid);
     LOG.print("YokisHack IP: "); LOG.println(WiFi.softAPIP());
 }

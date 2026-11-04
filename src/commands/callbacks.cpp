@@ -410,7 +410,9 @@ bool wifiConfig(const char* params) {
 bool wifiReconnect(const char*) { return reconnectWifi() == WL_CONNECTED; }
 
 bool wifiDiag(const char* params) {
-    WiFi.printDiag(LOG);
+    // Select diagnostics explicitly; SDK printDiag may include credentials.
+    LOG.print("WiFi mode: "); LOG.println(WiFi.getMode());
+    LOG.print("WiFi status: "); LOG.println(WiFi.status());
     LOG.print("Yokis-Hack IP: ");
     if (WiFi.getMode() == WIFI_AP) {
         LOG.println(WiFi.softAPIP());

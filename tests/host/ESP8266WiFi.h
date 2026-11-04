@@ -10,14 +10,41 @@
 #define ETS_UART_INTR_ENABLE() ((void)0)
 class WiFiClient {
 public:
+ struct SocketState{bool live=true;std::deque<uint8_t> input;std::string output;int writable=4096;};
+ std::shared_ptr<SocketState> socket;
  std::deque<std::pair<std::string,std::string>> packets;
  bool stopped=false;
- int available(){return packets.empty()?0:1;}
- void stop(){stopped=true;}
+ static WiFiClient testClient(){WiFiClient c;c.socket=std::make_shared<SocketState>();return c;}
+ void feed(const std::string& s){for(unsigned char c:s)socket->input.push_back(c);}
+ std::string output()const{return socket?socket->output:"";}
+ bool connected()const{return socket&&socket->live;}
+ explicit operator bool()const{return connected();}
+ int available(){return socket?int(socket->input.size()):(packets.empty()?0:1);}
+ int read(){if(!socket||socket->input.empty())return -1;int c=socket->input.front();socket->input.pop_front();return c;}
+ size_t write(uint8_t c){if(!connected()||!availableForWrite())return 0;socket->output+=char(c);return 1;}
+ size_t write(const uint8_t* p,size_t n){size_t i=0;for(;i<n&&write(p[i]);++i){}return i;}
+ size_t write(const char* p){return write(reinterpret_cast<const uint8_t*>(p),strlen(p));}
+ int availableForWrite()const{return connected()?socket->writable:0;}
+ void setAvailableForWrite(int n){if(socket)socket->writable=n;}
+ void setNoDelay(bool){}
+ void setTimeout(unsigned long){}
+ void stop(){stopped=true;if(socket)socket->live=false;}
+};
+class WiFiServer {
+public:
+ struct State{bool listening=false;unsigned beginCalls=0;std::deque<WiFiClient> pending;};
+ static std::shared_ptr<State> testState(uint16_t port){static std::map<uint16_t,std::shared_ptr<State>> states;auto& s=states[port];if(!s)s=std::make_shared<State>();return s;}
+ explicit WiFiServer(uint16_t port):state_(testState(port)){}
+ void begin(){state_->listening=true;++state_->beginCalls;}
+ void close(){state_->listening=false;}
+ void setNoDelay(bool){}
+ bool hasClient(){return !state_->pending.empty();}
+ WiFiClient accept(){if(!hasClient())return WiFiClient();auto c=state_->pending.front();state_->pending.pop_front();return c;}
+private:std::shared_ptr<State> state_;
 };
 class FakeWiFi {
 public:
- String ssid,psk_,savedSsid,savedPsk;
+ String ssid,psk_,savedSsid,savedPsk,apPassword;
  bool persistent_=false,autoReconnect_=false,autoConnect_=false;
  bool apReachable=true;
  int mode_=WIFI_STA,status_=WL_CONNECTED,beginCalls=0,reconnectCalls=0,eraseCalls=0,flashWrites=0;
@@ -42,7 +69,7 @@ public:
  int begin(){++beginCalls;mode_=WIFI_STA;status_=apReachable&&ssid.length()?WL_CONNECTED:WL_DISCONNECTED;return status_;}
  bool reconnect(){++reconnectCalls;status_=apReachable&&ssid.length()?WL_CONNECTED:WL_DISCONNECTED;return status_==WL_CONNECTED;}
  int status(){return status_;}
- bool softAP(const String&,const char*){mode_=WIFI_AP;return true;}
+ bool softAP(const String&,const char* password){mode_=WIFI_AP;apPassword=password;return true;}
  int waitForConnectResult(){return status_;}
 };
 extern FakeWiFi WiFi;
