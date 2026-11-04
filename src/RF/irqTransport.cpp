@@ -1,3 +1,8 @@
+/* HSPI transfer sequence adapted from ESP8266 Arduino core 3.1.2 SPI.cpp.
+ * Copyright (c) 2015 Hristo Gochkov. LGPL-2.1-or-later.
+ * See doc/LGPL-2.1.txt. The bounded wait and IRQ-only transport are local
+ * adaptations; the register setup intentionally follows that pinned core.
+ */
 #include "RF/irqTransport.h"
 #include <nRF24L01.h>
 #if defined(YOKIS_RADIO_TEST)
@@ -40,7 +45,10 @@ IRQ_CODE uint8_t RadioIrqTransport::exchange(uint8_t command, const uint8_t* tx,
 #if defined(YOKIS_RADIO_TEST)
     radioTestCsn(csnPin_, false); radioTestDelay(5);
     ok = radioTestIrqTransfer(command, status);
-    for (uint8_t i=0; ok && i<length; ++i) { ok=radioTestIrqTransfer(tx ? tx[i] : 0xff, byte); if(rx && ok)rx[i]=byte; }
+    for (uint8_t i=0; ok && i<length; ++i) {
+        ok = radioTestIrqTransfer(tx ? tx[i] : 0xff, byte);
+        if (rx && ok) rx[i] = byte;
+    }
     radioTestCsn(csnPin_, true); radioTestDelay(5);
 #elif defined(ESP8266)
     GPOC = csnMask_; ets_delay_us(5);
@@ -53,7 +61,10 @@ IRQ_CODE uint8_t RadioIrqTransport::exchange(uint8_t command, const uint8_t* tx,
 #else
     digitalWrite(csnPin_, LOW); delayMicroseconds(5);
     status = SPI.transfer(command);
-    for (uint8_t i=0; i<length; ++i) { byte=SPI.transfer(tx ? tx[i] : 0xff); if(rx)rx[i]=byte; }
+    for (uint8_t i=0; i<length; ++i) {
+        byte = SPI.transfer(tx ? tx[i] : 0xff);
+        if (rx) rx[i] = byte;
+    }
     digitalWrite(csnPin_, HIGH); delayMicroseconds(5);
 #endif
     if (success) *success = ok;

@@ -16,5 +16,8 @@ Les définitions nécessaires restent celles du commit
 Le pilote dérivé, la configuration et `printf.h` portent la licence GPL version 2
 de leurs auteurs, reproduite dans `doc/GPL-2.0.txt`. `nRF24L01.h` conserve sa
 licence permissive propre. La licence Apache du dépôt ne remplace pas ces notices.
+La séquence HSPI de `irqTransport.cpp` est adaptée du `SPI.cpp` du cœur ESP8266
+3.1.2, copyright Hristo Gochkov, sous LGPL-2.1-or-later ; le texte correspondant
+est conservé dans `doc/LGPL-2.1.txt`.
 Les versions TCP sont également unifiées sur la dépendance ESP8266 déclarée par
 ESPAsyncWebServer 3.3.7 : ESPAsyncTCP-esphome 2.0.0.
