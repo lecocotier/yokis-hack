@@ -3,6 +3,9 @@
 #include "globals.h"
 #include "reliability.h"
 #include "buildIdentity.h"
+#if defined(ESP8266) && defined(MQTT_ENABLED)
+#include "net/discoveryCleanup.h"
+#endif
 
 namespace {
 void finishActiveHold() {
@@ -363,6 +366,20 @@ bool reloadConfig(const char*) {
     Device* loaded[MQTT_MAX_NUM_OF_YOKIS_DEVICES] = {};
     int n = Device::loadFromLittleFS(loaded, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     if (n < 0) return false;
+#ifdef MQTT_ENABLED
+    // Preflight before detaching timers or invalidating borrowed pointers. A
+    // failed journal must leave every current object and command context alive.
+    for (auto* previous : g_devices) {
+        if (!previous) continue;
+        Device* next = Device::getFromList(loaded, n, previous->getName());
+        if ((!next || (next->getMode() == SHUTTER) != (previous->getMode() == SHUTTER)) &&
+            !Yokis::queueDiscoveryCleanup(previous->getName(), previous->getMode() == SHUTTER)) {
+            for (auto* candidate : loaded) delete candidate;
+            LOG.println("Reload aborted: discovery cleanup could not be saved");
+            return false;
+        }
+    }
+#endif
     finishActiveHold(); // Release before freeing the job's borrowed Device.
     // Detach all callbacks BEFORE freeing their Device arguments.
     for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i)
@@ -373,12 +390,6 @@ bool reloadConfig(const char*) {
     IrqManager::irqType = E2BP;
 #ifdef MQTT_ENABLED
     if (g_mqtt) {
-        for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i) {
-            if (g_devices[i]) {
-                Device* next = Device::getFromList(loaded, n, g_devices[i]->getName());
-                if (!next || next->getMode() != g_devices[i]->getMode()) g_mqtt->removeDiscovery(g_devices[i]);
-            }
-        }
         g_mqtt->clearSubscriptions(); g_mqtt->setDiscoveryDone(false);
     }
 #endif

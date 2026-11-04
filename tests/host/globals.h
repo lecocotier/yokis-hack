@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "adminConfig.h"
+#include "debugLevel.h"
 #include "RF/device.h"
 #include "RF/e2bp.h"
 #include "RF/pairing.h"
@@ -30,6 +31,7 @@ inline bool consoleInputPending(){return Serial.available()!=0;}
 #define FLAG_POLLING 4
 #define FLAG_IS_ENABLED(f) ((g_ConfigFlags & (f))!=0)
 #define IS_DEBUG_ENABLED FLAG_IS_ENABLED(FLAG_DEBUG)
+#define IS_RF_TRACE_ENABLED (Yokis::debugLevel(g_ConfigFlags) >= 1)
 #define FLAG_ENABLE(f) (g_ConfigFlags|=(f))
 #define FLAG_DISABLE(f) (g_ConfigFlags&=~(f))
 #define FLAG_TOGGLE(f) (g_ConfigFlags^=(f))

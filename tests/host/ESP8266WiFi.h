@@ -50,6 +50,7 @@ public:
  int mode_=WIFI_STA,status_=WL_CONNECTED,beginCalls=0,reconnectCalls=0,eraseCalls=0,flashWrites=0;
  std::vector<std::string> events;
  String SSID(){return ssid;}String psk(){return psk_;}
+ int RSSI(){return -65;}
  void printDiag(Print&){}int getMode(){return mode_;}
  String softAPIP(){return "192.0.2.1";}String localIP(){return "192.0.2.2";}
  void persistent(bool v){persistent_=v;events.push_back(v?"persistent:on":"persistent:off");}

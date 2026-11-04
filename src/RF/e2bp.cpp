@@ -478,8 +478,9 @@ bool E2bp::runMainLoop() {
         read(answerBuf, sizeof(answerBuf));
         receivedResponse = true;
 
-        // These transaction traces are currently unconditional. They are not
-        // ISR logging; their cost still contributes to synchronous RF latency.
+        // Traces are foreground only. Decoding below always runs, even at level
+        // zero: verbosity must never affect state, timestamps or STOP handling.
+        if (IS_RF_TRACE_ENABLED) {
         LOG.print("Received: ");
         LOG.print(device->getName());
         LOG.print(" (");
@@ -489,6 +490,7 @@ bool E2bp::runMainLoop() {
         LOG.print(" ");
         printBinaryRepresentation(answerBuf[1], true);
         LOG.print(" - ");
+        }
 
         // The same resting bytes can mean an endpoint or an intermediate STOP.
         // ShutterFeedback combines raw observations with this device's command
@@ -496,6 +498,7 @@ bool E2bp::runMainLoop() {
         if (device->getMode() == SHUTTER) {
             Yokis::ShutterFeedback& feedback = device->shutterFeedback();
             firstPayloadStatus = feedback.observe(answerBuf[0], answerBuf[1], millis());
+            if (IS_RF_TRACE_ENABLED) {
             LOG.print(feedback.pending() ? "Command reply (pre-state possible)" :
                       Device::getStatusAsString(firstPayloadStatus));
             LOG.print(" - Source: "); LOG.print(feedback.pending() ? "command_reply" : feedback.sourceName());
@@ -506,22 +509,23 @@ bool E2bp::runMainLoop() {
             if (feedback.hasCommand()) LOG.print(uint32_t(millis() - feedback.commandAt()));
             else LOG.print("n/a");
             LOG.print(" - Previous: "); LOG.println(Device::getStatusAsString(device->getStatus()));
+            }
         } else {
             if (firstPayloadStatus == UNDEFINED) {
                 if (answerBuf[1] == 1 || answerBuf[0] == 0x2f) {
                     firstPayloadStatus = ON;
-                    LOG.println("On");
+                    if (IS_RF_TRACE_ENABLED) LOG.println("On");
                 } else {
                     firstPayloadStatus = OFF;
-                    LOG.println("Off");
+                    if (IS_RF_TRACE_ENABLED) LOG.println("Off");
                 }
             } else {
                 if (answerBuf[1] == 1 || answerBuf[0] == 0x2f) {
                     secondPayloadStatus = ON;
-                    LOG.println("On");
+                    if (IS_RF_TRACE_ENABLED) LOG.println("On");
                 } else {
                     secondPayloadStatus = OFF;
-                    LOG.println("Off");
+                    if (IS_RF_TRACE_ENABLED) LOG.println("Off");
                 }
             }
         }

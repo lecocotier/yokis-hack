@@ -5,6 +5,9 @@
 
 #if defined(ESP8266)
 #include <FS.h>
+#if defined(MQTT_ENABLED)
+#include "net/discoveryCleanup.h"
+#endif
 #endif
 
 // A Device owns configuration and volatile observations; it does not own the
@@ -328,7 +331,7 @@ bool Device::writeConfig(const Device* replacement, const char* removedName, boo
     if (!YokisLittleFS::init()) return false;
     const char* temp = "/yokis.conf.tmp";
     File input;
-    if (!clear && LittleFS.exists(LITTLEFS_CONFIG_FILENAME)) {
+    if (LittleFS.exists(LITTLEFS_CONFIG_FILENAME)) {
         input = LittleFS.open(LITTLEFS_CONFIG_FILENAME, "r");
         if (!input) return false;
     }
@@ -340,8 +343,18 @@ bool Device::writeConfig(const Device* replacement, const char* removedName, boo
         if (!line[0]) continue;
         Device d("");
         if (!parseConfigLine(line, d)) { ok = false; break; }
-        if ((removedName && strcmp(d.getName(), removedName) == 0) ||
-            (replacement && strcmp(d.getName(), replacement->getName()) == 0)) continue;
+        const bool replaced = replacement && strcmp(d.getName(), replacement->getName()) == 0;
+        const bool removed = clear || (removedName && strcmp(d.getName(), removedName) == 0);
+#ifdef MQTT_ENABLED
+        // Own the obsolete identity durably BEFORE committing its removal.
+        // A failed config rename leaves an intent which is reconciled against
+        // the still-active identity before any retained message is cleared.
+        if ((removed || (replaced && (d.getMode() == SHUTTER) != (replacement->getMode() == SHUTTER))) &&
+            !Yokis::queueDiscoveryCleanup(d.getName(), d.getMode() == SHUTTER)) {
+            ok = false; break;
+        }
+#endif
+        if (removed || replaced) continue;
         if (++count > 64 || output.println(line) != strlen(line) + 2) ok = false;
     }
     if (replacement && ok) {

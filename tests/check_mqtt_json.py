@@ -48,3 +48,19 @@ for path in [build / 'shutter-discovery.json', *sorted(build.glob('network-disco
 assert detail['state_replayed'] is False
 assert isinstance(detail['status_age_ms'], int)
 print('Network discovery: 5 JSON configurations valid; dual availability and identifiers preserved')
+
+# Independently parse the bounded writer's actual bytes, including controls,
+# escapes, UTF-8 and every page of a full 64-device configuration.
+hostile = json.loads((build / 'diagnostics-hostile-empty.json').read_text(encoding='utf-8'))
+assert hostile['devices'] == []
+assert hostile['wifi']['ssid'] == 'wifi"\\\n\t\x01'
+assert hostile['mqtt']['host'] == 'broker"\\\r\b\f\x02'
+names = []
+for page in range(8):
+    item = json.loads((build / f'diagnostics-page{page}.json').read_text(encoding='utf-8'))
+    assert item['page'] == page and item['total'] == 64
+    assert item['has_next'] == (page < 7)
+    assert len(item['devices']) == 8
+    names.extend(device['name'] for device in item['devices'])
+assert len(set(names)) == 64
+print('Diagnostics: 9 JSON snapshots valid; escaped controls and all 64 devices preserved')

@@ -37,6 +37,7 @@ public:
  String(int v, int base=10):String(static_cast<unsigned long>(v),base){}
  String(unsigned int v, int base=10):String(static_cast<unsigned long>(v),base){}
  const char* c_str()const{return s.c_str();}
+ String toString()const{return *this;}
  unsigned int length()const{return s.size();}
  String& operator+=(char c){s+=c;return *this;}
  String& operator+=(const String& v){s+=v.s;return *this;}
@@ -100,5 +101,5 @@ inline int digitalRead(int){return testIrqPin();}
 inline int digitalPinToInterrupt(int p){return p;}
 inline void attachInterrupt(int,void(*)(),int){}
 inline void detachInterrupt(int){}
-struct FakeESP{unsigned restartCount=0;uint32_t chipId=0x123456;void restart(){++restartCount;}unsigned getFlashChipId(){return 1;}uint32_t getChipId(){return chipId;}};
+struct FakeESP{unsigned restartCount=0;uint32_t chipId=0x123456;void restart(){++restartCount;}unsigned getFlashChipId(){return 1;}uint32_t getChipId(){return chipId;}uint32_t getFreeHeap(){return 30000;}};
 extern FakeESP ESP;

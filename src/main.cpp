@@ -264,7 +264,7 @@ void pollForStatus(Device* d) {
             LOG.println(" is offline");
             d->offline();
             g_mqtt->notifyOffline(d);
-        } else {
+        } else if (IS_RF_TRACE_ENABLED) {
             LOG.print("Failed to check device ");
             LOG.print(d->getName());
             LOG.print(" ");

@@ -3,6 +3,8 @@
 #include "serial/flagCallback.h"
 #include "serial/usageCallback.h"
 #include "buildIdentity.h"
+#include "debugLevel.h"
+#include "serial/debugCallback.h"
 
 // One bounded line buffer serves serial and Telnet. Keep overflow sticky until
 // the line ending: executing the tail as another command could act on a device.
@@ -17,7 +19,7 @@ SerialHelper::SerialHelper() {
     this->registerCallback(
         new UsageCallback("help", "display this help", this));
     this->registerCallback(
-        new FlagCallback("debug", "toggle debug mode", FLAG_DEBUG));
+        new DebugCallback("debug", "Set debug 0/1/2; no argument cycles levels"));
     this->registerCallback(
         new FlagCallback("raw", "toggle raw / formatted output", FLAG_RAW));
     this->registerCallback(
@@ -108,7 +110,7 @@ void SerialHelper::usage() {
 bool SerialHelper::displayConfig(void) {
     LOG.print("Config:");
     LOG.print(" DEBUG=");
-    LOG.print(IS_DEBUG_ENABLED);
+    LOG.print(Yokis::debugLevel(g_ConfigFlags));
     LOG.print(" RAW=");
     LOG.print(FLAG_IS_ENABLED(FLAG_RAW));
     LOG.print(" POLLING=");

@@ -1,4 +1,5 @@
 // Production MQTT and Wi-Fi calls. No discovery or reconnection logic is duplicated here.
+#include "net/discoveryCleanup.h"
 void testNetwork(Device* d, WiFiClient& wifi) {
  freshDevice();g_ConfigFlags=0;IrqManager::irqType=E2BP;
  g_mqtt->connected_=true;g_mqtt->publications.clear();
@@ -107,8 +108,12 @@ void testNetwork(Device* d, WiFiClient& wifi) {
  {WiFiClient otherWifi;ESP.chipId=0x654321;Mqtt otherMqtt(otherWifi);
   CHECK(std::string(otherMqtt.clientId())!=g_mqtt->clientId());
   CHECK(std::string(otherMqtt.gatewayTopic())!=g_mqtt->gatewayTopic());ESP.chipId=0x123456;}
- // Retained states are explicitly removed with an entity while connected.
- g_mqtt->removeDiscovery(d);CHECK(published("volet/tele/STATE")=="");CHECK(published("volet/tele/DETAIL")=="");
+ // A queued deletion of a still-active identity is cancelled on reconciliation.
+ // Offline deletion and freed Device lifetime are covered by integration cases.
+ CHECK(g_mqtt->removeDiscovery(d));
+ const auto beforeCleanup = g_mqtt->publications.size();
+ CHECK(Yokis::serviceDiscoveryCleanup(*g_mqtt,g_devices,64)==Yokis::CleanupResult::Progress);
+ CHECK(g_mqtt->publications.size()==beforeCleanup);
  // Re-entering the same Wi-Fi credentials must reconnect rather than do nothing.
  WiFi=FakeWiFi();WiFi.ssid="home";WiFi.psk_="password";
  WiFi.savedSsid="home";WiFi.savedPsk="password";WiFi.status_=WL_DISCONNECTED;

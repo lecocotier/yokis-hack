@@ -3,6 +3,7 @@
 #include "RF/device.h"
 #include "globals.h"
 #include "reliability.h"
+#include "net/discoveryCleanup.h"
 
 // Home Assistant receives three distinct facts: gateway connection, radio
 // reachability and device state. Cached/estimated state must not overwrite
@@ -54,6 +55,9 @@ void MqttHass::serviceRefresh(Device* const* devices, size_t count) {
     // by the caller first. No RF transaction is performed in this method.
     if (refreshClockStarted_ && !Yokis::elapsed(millis(), lastRefreshAt_, 100)) return;
     refreshClockStarted_ = true; lastRefreshAt_ = millis();
+    // At most one retained deletion/checkpoint per turn. The journal survives
+    // offline removals and owns names after the corresponding Device is freed.
+    if (Yokis::serviceDiscoveryCleanup(*this, devices, count) != Yokis::CleanupResult::Idle) return;
     if (!birthSubscribed_) {
         // Kept outside the device subscription list: reloading devices neither
         // removes this subscription nor repeatedly replays a retained birth.
@@ -147,11 +151,19 @@ bool MqttHass::publishDevice(const Device* device) {
         LOG.println("MQTT discovery too large; nothing published"); return false;
     }
 
+    if (IS_DEBUG_ENABLED) {
     LOG.print("Sending MQTT message, topic_len=");
     LOG.print(strlen(topic));
     LOG.print(", payload_len=");
     LOG.println(strlen(payload));
+    }
 
+    // Old component declarations can survive a retype or an older firmware.
+    // Clear only that declaration; STATE/DETAIL/LWT belong to this live name.
+    char obsolete[128];
+    snprintf(obsolete, sizeof(obsolete), "%s/%s/%s/config", HASS_PREFIX,
+        device->getMode() == SHUTTER ? "light" : "cover", device->getName());
+    if (!publish(obsolete, "", true)) return false;
     ret = this->publish(topic, payload, true);
     if (ret) ret = notifyAvailability(device, device->getAvailability() == OFFLINE ? "Offline" : "Online");
 
@@ -217,7 +229,11 @@ bool MqttHass::notifyBrightness(const Device* device, bool replayed) {
     char buf[96];
     char bufPayload[64];
 
-    bool ok = notifyPower(device, (device->getBrightness() == BRIGHTNESS_OFF ? OFF : ON), replayed);
+    // Brightness is cached independently. After a failed observation it cannot
+    // turn an unknown power state into a measured ON/OFF, including HA replay.
+    const DeviceStatus power = device->getStatus() == UNDEFINED ? UNDEFINED :
+        (device->getBrightness() == BRIGHTNESS_OFF ? OFF : ON);
+    bool ok = notifyPower(device, power, replayed);
 
     snprintf(buf, 96, "%s/tele/BRIGHTNESS", device->getName());
     sprintf(bufPayload, "{\"BRIGHTNESS\":\"%d\"}", device->getBrightness());
@@ -236,14 +252,7 @@ bool MqttHass::subscribeDevice(const Device* device) {
     }
     return ok;
 }
-void MqttHass::removeDiscovery(const Device* device) {
-    // Retained messages outlive the local Device. Clear them while connected;
-    // there is no durable offline deletion queue in this firmware.
-    char topic[128]; newPublishTopic(device, topic); publish(topic, "", true);
-    const char* suffixes[] = {"STATE", "DETAIL", "BRIGHTNESS", "LWT"};
-    for (const char* suffix : suffixes) {
-        snprintf(topic, sizeof(topic), "%s/tele/%s", device->getName(), suffix);
-        publish(topic, "", true);
-    }
+bool MqttHass::removeDiscovery(const Device* device) {
+    return device && Yokis::queueDiscoveryCleanup(device->getName(), device->getMode() == SHUTTER);
 }
 #endif

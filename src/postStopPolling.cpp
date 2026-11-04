@@ -13,8 +13,10 @@ void expirePostStopChecks() {
         if (d->shutterFeedback().expireVerification(millis())) {
             d->setStatus(UNDEFINED);
             d->clearPollingRequest();
-            LOG.print("Post-STOP "); LOG.print(d->getName());
-            LOG.println(" result=inconclusive reason=deadline");
+            if (IS_RF_TRACE_ENABLED) {
+                LOG.print("Post-STOP "); LOG.print(d->getName());
+                LOG.println(" result=inconclusive reason=deadline");
+            }
             if (g_mqtt) g_mqtt->notifyPower(d);
         }
     }
@@ -40,14 +42,18 @@ bool servicePostStopPolling() {
         if (!d || d->getMode() != SHUTTER || !d->isConfigured()) continue;
         const Yokis::StopVerification& check = d->shutterFeedback().verification();
         if (!check.due(millis())) continue;
+        if (IS_RF_TRACE_ENABLED) {
         LOG.print("Post-STOP "); LOG.print(d->getName());
         LOG.print(" attempt="); LOG.print(check.attempts() + 1);
         LOG.print("/3 age_ms="); LOG.println(check.age(millis()));
+        }
         pollForStatus(d);
+        if (IS_RF_TRACE_ENABLED) {
         LOG.print("Post-STOP "); LOG.print(d->getName());
         LOG.print(" result="); LOG.print(check.name());
         LOG.print(" response="); LOG.print(g_bp->hasResponse() ? "yes" : "no");
         LOG.print(" state="); LOG.println(Device::getStatusAsString(d->getStatus()));
+        }
         return true; // one radio transaction, then service commands again
     }
     return false;

@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "adminConfig.h"
+#include "debugLevel.h"
 
 #ifdef ESP8266
 #include <Ticker.h>
@@ -111,6 +112,7 @@ extern AdminConsole g_telnetAndSerial;
 
 // returns true if debug is enabled
 #define IS_DEBUG_ENABLED ((FLAG_IS_ENABLED(FLAG_DEBUG)))
+#define IS_RF_TRACE_ENABLED (Yokis::debugLevel(g_ConfigFlags) >= 1)
 // test if a flag is enabled
 #define FLAG_IS_ENABLED(f) (((g_ConfigFlags) & (f)) > 0)
 // enable a config flag

@@ -44,7 +44,7 @@ def main() -> int:
                "src/RF/configurator.cpp", "src/utils.cpp", "src/postStopPolling.cpp", "src/RF/pairing.cpp",
                "src/RF/copy.cpp", "src/RF/scanner.cpp", "src/RF/irqManager.cpp", "src/commands/callbacks.cpp"]
     sources += sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "src/serial").glob("*.cpp"))
-    sources += ["src/net/wifi.cpp", "src/net/webserver.cpp", "src/net/mqtt.cpp", "src/net/mqttHass.cpp",
+    sources += ["src/net/wifi.cpp", "src/net/webserver.cpp", "src/net/diagnostics.cpp", "src/net/discoveryCleanup.cpp", "src/net/mqtt.cpp", "src/net/mqttHass.cpp",
                 "src/net/mqttConfig.cpp", "src/storage/yokisLittleFS.cpp"]
     binary = build / ("regression.exe" if windows else "regression")
     print("Native compiler:", compiler, flush=True)

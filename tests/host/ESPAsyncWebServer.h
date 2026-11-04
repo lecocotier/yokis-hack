@@ -20,6 +20,7 @@ public:
  bool authenticate(const char* u,const char* p){return authUser==u&&authPassword==p;}
  void requestAuthentication(){status=401;response="Authentication required";}
  void send(int code,const char*,const char* body){status=code;response=body;}
+ void send_P(int code,const char* type,const char* body){send(code,type,body);}
  void send_P(int code,const char*,const char* body,String(*processor)(const String&)){
   status=code;response.clear();std::string s(body);
   for(size_t i=0;i<s.size();){if(s[i]!='%'){response+=s[i++];continue;}size_t end=s.find('%',i+1);if(end==std::string::npos){response+=s.substr(i);break;}if(end==i+1)response+='%';else response+=processor(String(s.substr(i+1,end-i-1))).s;i=end+1;}

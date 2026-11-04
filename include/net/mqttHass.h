@@ -41,7 +41,7 @@ class MqttHass : public Mqtt {
     void serviceRefresh(Device* const*, size_t);
     bool handleBirth(const char*, const uint8_t*, unsigned int);
     bool refreshPending() const { return !discoveryDone || replayPending_; }
-    void removeDiscovery(const Device*);
+    bool removeDiscovery(const Device*);
     bool publishDevice(const Device*);
     bool subscribeDevice(const Device*);
     bool notifyAvailability(const Device*, const char*);

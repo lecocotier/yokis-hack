@@ -2,6 +2,12 @@
 #include "net/webserver.h"
 #include "globals.h"
 #include "reliability.h"
+#include "buildIdentity.h"
+#include "debugLevel.h"
+#include "net/diagnostics.h"
+#include "net/diagnosticPage.h"
+#include <memory>
+#include <new>
 #include <osapi.h>
 
 namespace {
@@ -44,7 +50,48 @@ WebServer::WebServer(uint16_t port, const char* username, const char* password)
     : AsyncWebServer(port), username_(username), password_(password) {
     on("/", HTTP_GET, [this](AsyncWebServerRequest* r) {
         if (!authorize(r)) return;
+        // No template processor: CSS percentages and data never become tokens.
+        r->send_P(200, "text/html; charset=utf-8", diagnostic_html);
+    });
+    on("/config", HTTP_GET, [this](AsyncWebServerRequest* r) {
+        if (!authorize(r)) return;
         r->send_P(200, "text/html", html_config_form, processor);
+    });
+    on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* r) {
+        if (!authorize(r)) return;
+        uint32_t page = 0;
+        if (r->hasParam("page") &&
+            !Yokis::unsignedNumber(r->getParam("page")->value().c_str(), 7, page)) {
+            r->send(400, "text/plain", "Invalid page"); return;
+        }
+        size_t total = 0;
+        for (auto* device : g_devices) if (device) ++total;
+        if (page && page * 8 >= total) {
+            r->send(400, "text/plain", "Invalid page"); return;
+        }
+        // A bounded heap buffer keeps the AsyncTCP callback's small stack free.
+        // All pointers below stay alive until send() has copied the response.
+        std::unique_ptr<char[]> json(new (std::nothrow) char[4096]);
+        const String ssid = WiFi.SSID(), ip = WiFi.localIP().toString();
+        Yokis::DiagnosticsSnapshot snapshot = {};
+        snapshot.buildId = YOKIS_BUILD_ID;
+        snapshot.gitRevision = YOKIS_BUILD_GIT_REVISION;
+        snapshot.sourceSha256 = YOKIS_BUILD_SOURCE_SHA256;
+        snapshot.ssid = ssid.c_str(); snapshot.ip = ip.c_str();
+        snapshot.wifiConnected = WiFi.status() == WL_CONNECTED;
+        snapshot.rssi = WiFi.RSSI(); snapshot.freeHeap = ESP.getFreeHeap();
+        snapshot.uptimeMs = millis(); snapshot.debugLevel = Yokis::debugLevel(g_ConfigFlags);
+#ifdef MQTT_ENABLED
+        snapshot.mqttConfigured = g_mqtt && !g_mqtt->isEmpty();
+        snapshot.mqttConnected = g_mqtt && g_mqtt->connected();
+        snapshot.mqttHost = g_mqtt ? g_mqtt->getHost() : "";
+        snapshot.mqttPort = g_mqtt ? g_mqtt->getPort() : 0;
+#endif
+        if (!json || !Yokis::writeDiagnosticJson(json.get(), 4096, snapshot,
+                g_devices, MQTT_MAX_NUM_OF_YOKIS_DEVICES, page)) {
+            r->send(503, "text/plain", "Diagnostics temporarily unavailable"); return;
+        }
+        r->send(200, "application/json; charset=utf-8", json.get());
     });
     on("/save_config", HTTP_GET, [this](AsyncWebServerRequest* r) {
         if (authorize(r)) r->send(405, "text/plain", "Use POST");
