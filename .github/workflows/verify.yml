@@ -23,13 +23,10 @@ jobs:
           name: source-snapshot
           path: source-snapshot.zip
           retention-days: 7
-      - name: Native regression tests
-        run: |
-          bash tests/run_native.sh
       - name: Install PlatformIO
         run: python3 -m pip install platformio==6.1.18 Jinja2==3.1.6
-      - name: Validate MQTT JSON and Home Assistant value template
-        run: python3 tests/check_mqtt_json.py
+      - name: Native regression tests and MQTT JSON
+        run: python3 tests/run_native.py
       - name: Compile ESP8266 and Arduino Mega (no upload)
         # The ESP8266 builder validates an OTA destination even for build-only.
         # Loopback is a CI-only placeholder. No upload target is ever invoked.
@@ -44,3 +41,13 @@ jobs:
             .pio/build/d1_mini_ota/firmware.bin
             .pio/build/megaatmega2560/firmware.hex
           retention-days: 14
+
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare project-local native tools
+        run: python tools/setup_native.py
+      - name: Native Windows regression tests and MQTT JSON
+        run: python tests/run_native.py

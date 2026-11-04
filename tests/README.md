@@ -1,5 +1,20 @@
 # Native reliability regression tests
 
+Windows (Python 3, no Bash/WSL required):
+
+```powershell
+python tools/setup_native.py
+python tests/run_native.py
+# Or: ./tests/run_native.ps1
+```
+
+The pinned [w64devkit release](https://github.com/skeeto/w64devkit/releases/tag/v2.11.0)
+is downloaded from its official project and verified by SHA-256. It and Python
+dependencies remain in ignored `.tools/`; no system installation or persistent
+PATH change is made. Windows runs the real production-code checks without
+sanitizers. Linux/CI retains ASan, UBSan and leak checking. The common runner
+also validates the generated JSON/Jinja templates.
+
 Run `bash tests/run_native.sh` from any directory on Linux with Python 3 and g++.
 The suite uses C++11, AddressSanitizer, UndefinedBehaviorSanitizer and leak checking.
 Warnings in the tested application code are errors (platform-irrelevant qualifiers

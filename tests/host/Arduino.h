@@ -57,6 +57,9 @@ public:
  size_t print(long n,int base=10){if(base==16)return print(static_cast<unsigned long>(n),base);char b[40];std::snprintf(b,sizeof(b),"%ld",n);return print(b);}
  size_t print(unsigned int n,int b=10){return print((unsigned long)n,b);}
  size_t print(int n,int b=10){return print((long)n,b);}
+ // Windows is LLP64: size_t is unsigned long long, unlike Linux LP64.
+ size_t print(unsigned long long n,int base=10){char b[40];std::snprintf(b,sizeof(b),base==16?"%llx":"%llu",n);return print(b);}
+ size_t print(long long n,int base=10){if(base==16)return print(static_cast<unsigned long long>(n),base);char b[40];std::snprintf(b,sizeof(b),"%lld",n);return print(b);}
  size_t println(){return print("\r\n");}
  template<class T>size_t println(T t){return print(t)+println();}
  template<class T>size_t println(T t,int b){return print(t,b)+println();}
