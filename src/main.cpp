@@ -157,6 +157,7 @@ void setup() {
 }
 
 void loop() {
+    bool automaticRadioWork = false;
 #if defined(ESP8266)
     LOG.handle(); // telnetspy handling
     webserver.processPending();
@@ -173,8 +174,10 @@ void loop() {
     // Drain already received commands before ANY automatic status query.
     // No recursive MQTT calls from the radio; special RF modes retain ownership.
     if (FLAG_IS_ENABLED(FLAG_POLLING) && IrqManager::irqType == E2BP &&
-        !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available() &&
-        !servicePostStopPolling() && !postStopChecksPending() && g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
+        !g_mqtt->handledInput() && !g_mqtt->hasPendingInput() && !LOG.available()) {
+        automaticRadioWork = servicePostStopPolling();
+        if (!automaticRadioWork && !postStopChecksPending() && !g_bp->holdActive() &&
+            g_mqtt->connected() && g_mqtt->isDiscoveryDone()) {
         // One poll per main-loop iteration: queued commands get serviced
         // between devices instead of waiting through up to 64 timeouts.
         static uint8_t next = 0;
@@ -183,14 +186,31 @@ void loop() {
             next = (next + 1) % MQTT_MAX_NUM_OF_YOKIS_DEVICES;
             if (g_devices[i] && g_devices[i]->needsPolling() &&
                 !g_devices[i]->shutterFeedback().verification().pending()) {
-                pollForStatus(g_devices[i]); break;
+                pollForStatus(g_devices[i]); automaticRadioWork = true; break;
             }
+        }
         }
     }
 #endif // MQTT_ENABLED
 #endif // ESP8266
     if (IrqManager::irqType == SCANNER) g_scanner->service();
     g_serial->readFromSerial();
+    bool canServiceHold = !automaticRadioWork && IrqManager::irqType == E2BP && !LOG.available();
+#if defined(ESP8266) && defined(MQTT_ENABLED)
+    canServiceHold = canServiceHold && !g_mqtt->handledInput() &&
+        !g_mqtt->hasPendingInput() && !postStopChecksPending();
+#endif
+    if (canServiceHold) {
+        Device* changed = g_bp->serviceHold();
+#if defined(ESP8266) && defined(MQTT_ENABLED)
+        if (changed) {
+            if (changed->getStatus() == UNDEFINED) g_mqtt->notifyPower(changed, UNDEFINED);
+            else g_mqtt->notifyBrightness(changed);
+        }
+#else
+        (void)changed;
+#endif
+    }
     delay(1);
 }
 

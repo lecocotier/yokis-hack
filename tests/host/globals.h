@@ -41,7 +41,7 @@ extern Device* g_currentDevice;
 extern MqttHass* g_mqtt;
 extern SerialHelper* g_serial;
 #include "net/webserver.h"
-struct FakeOTA{void handle(){}};
+struct FakeOTA{unsigned handleCalls=0;void handle(){++handleCalls;}};
 extern FakeOTA ArduinoOTA;
 extern WebServer webserver;
 void loop();

@@ -32,6 +32,9 @@ class E2bp : public RFConfigurator {
     uint16_t txCycles;
     DeviceStatus firstPayloadStatus, secondPayloadStatus;
     uint8_t answerBuf[2];
+    Device* holdDevice_ = NULL; // Borrowed; cleared before configuration reload.
+    uint32_t holdStartedAt_ = 0, holdDuration_ = 0, holdPulseAt_ = 0;
+    bool holdCancelled_ = false;
 
     bool setDeviceStatus(DeviceStatus);
     uint8_t *getPayload(uint8_t *, PayloadType);
@@ -76,6 +79,10 @@ class E2bp : public RFConfigurator {
     bool release();
     // press and hold for a specific duration (ms)
     bool pressAndHoldFor(unsigned long);
+    bool holdActive() const { return holdDevice_ != NULL; }
+    const Device* heldDevice() const { return holdDevice_; }
+    bool cancelHold(bool release = true);
+    Device* serviceHold(); // At most one due RF exchange; caller publishes it.
     bool hasResponse() const { return receivedResponse; }
     uint16_t getTxCycles() const { return txCycles; }
     const uint8_t* getRawResponse() const { return answerBuf; }

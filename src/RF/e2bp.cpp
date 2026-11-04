@@ -10,13 +10,17 @@ E2bp::E2bp(uint16_t cepin, uint16_t cspin) : RFConfigurator(cepin, cspin), devic
     radioReady = false; reset();
 }
 // Device is borrowed from the configured list, never owned by this radio helper.
-E2bp::~E2bp() {}
+E2bp::~E2bp() { cancelHold(false); }
 void E2bp::reset() {
     firstPayloadStatus = secondPayloadStatus = UNDEFINED;
     loopContinue = true; receivedResponse = false; txCycles = 0;
     memset(answerBuf, 0, sizeof(answerBuf));
 }
 void E2bp::setDevice(Device* d) {
+    // Explicit commands preempt a hold without inserting a release ahead of
+    // their own RF packet. The main loop sends that release on its next turn.
+    if (!d) cancelHold(false);
+    else if (holdActive()) cancelHold();
     device = d; radioReady = false; reset();
 }
 
@@ -284,36 +288,58 @@ bool E2bp::release() {
     return ret;
 }
 
-// Press and hold a button
-// Send begin payload and dimming payload while
-// release() has not been called
+// Accept a hold; its duration is serviced from loop(), not spent in this call.
 bool E2bp::pressAndHoldFor(unsigned long duration) {
-    // Only for dimmers and must be > 700ms
-    if (!device || device->getMode() != DIMMER || duration <= 700 || duration > 600000) return false;
+    if (holdActive() || !device || device->getMode() != DIMMER ||
+        duration <= 700 || duration > 600000) return false;
 
     reset();
     setupRFModule();
     if (!radioReady || !press()) return false;
 
-    const uint32_t holdStart = millis();
-    uint32_t startTime = holdStart;
-    // Every second until timeout, send a dim command
-    do {
-        // send payload every 1 second
-        if (millis() - startTime >= 1000) {
-            startTime = millis();
-            reset();
-            setupRFModule();
-            press(true);
-        }
-        yield();
-        delayMicroseconds(1000);  // 1 ms delay
-    } while (!Yokis::elapsed(millis(), holdStart, uint32_t(duration)));
+    holdDevice_ = device;
+    holdDuration_ = uint32_t(duration);
+    holdStartedAt_ = holdPulseAt_ = millis();
+    holdCancelled_ = false;
+    LOG.println("Button hold scheduled; release <device> cancels it");
+    return true;
+}
 
-    bool ret = release();
-    // no brightness level available but device is ON
-    if (ret) device->setBrightness(BRIGHTNESS_MAX);
-    return ret;
+bool E2bp::cancelHold(bool sendRelease) {
+    if (!holdActive()) return false;
+    if (sendRelease) holdCancelled_ = true;
+    else { holdDevice_ = NULL; holdCancelled_ = false; }
+    return true;
+}
+
+Device* E2bp::serviceHold() {
+    if (!holdActive()) return NULL;
+    const uint32_t now = millis();
+    const bool finishing = holdCancelled_ || Yokis::elapsed(now, holdStartedAt_, holdDuration_);
+    if (!finishing && !Yokis::elapsed(now, holdPulseAt_, 1000)) return NULL;
+
+    Device* target = holdDevice_;
+    Device* previous = device;
+    // Switch the borrowed target internally; setDevice() deliberately cancels
+    // a hold when called by an ordinary command or configuration reload.
+    device = target;
+    reset();
+    setupRFModule();
+    const bool ok = radioReady && (finishing ? release() : press(true));
+    if (!ok) target->setStatus(UNDEFINED);
+    if (finishing) {
+        if (ok) target->setBrightness(BRIGHTNESS_MAX); // Legacy inferred level.
+        holdDevice_ = NULL;
+        holdCancelled_ = false;
+        LOG.println(ok ? "Button hold released" : "Button hold release unconfirmed");
+    } else {
+        holdPulseAt_ = millis(); // No catch-up burst if servicing was delayed.
+        if (!ok) holdCancelled_ = true;
+    }
+    device = previous;
+    radioReady = false;
+    reset();
+    return target;
 }
 
 // Individual shutter orders retain 0x06 and a zero fourth byte. Upstream also

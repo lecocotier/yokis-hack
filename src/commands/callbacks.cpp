@@ -4,6 +4,9 @@
 #include "reliability.h"
 
 namespace {
+void finishActiveHold() {
+    if (g_bp && g_bp->cancelHold()) g_bp->serviceHold();
+}
 // Pair/copy borrow the physical NRF only for their operation. Restore both
 // routing and radio registers: changing irqType alone leaves the pairing setup.
 void resumeDeviceRadio() {
@@ -121,6 +124,7 @@ void registerAllCallbacks() {
 }
 
 bool pairingCallback(const char*) {
+    finishActiveHold();
     uint8_t buf[5];  // enough size for addr, serial and version
     IrqManager::irqType = PAIRING;
     bool res = g_pairingRF->hackPairing();
@@ -218,6 +222,7 @@ bool scannerCallback(const char* params) {
         return false;
     }
 
+    finishActiveHold();
     IrqManager::irqType = SCANNER;
     g_scanner->setDevice(d);
     g_scanner->setupRFModule();
@@ -233,6 +238,7 @@ bool copyCallback(const char* params) {
         return false;
     }
 
+    finishActiveHold();
     IrqManager::irqType = COPYING;
     g_copy->setDevice(d);
     const bool copied = g_copy->send();
@@ -291,6 +297,7 @@ bool releaseCallback(const char* params) {
         return false;
     }
 
+    if (g_bp->heldDevice() == d) return g_bp->cancelHold();
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
     g_bp->reset();
@@ -344,6 +351,7 @@ bool reloadConfig(const char*) {
     Device* loaded[MQTT_MAX_NUM_OF_YOKIS_DEVICES] = {};
     int n = Device::loadFromLittleFS(loaded, MQTT_MAX_NUM_OF_YOKIS_DEVICES);
     if (n < 0) return false;
+    finishActiveHold(); // Release before freeing the job's borrowed Device.
     // Detach all callbacks BEFORE freeing their Device arguments.
     for (unsigned i = 0; i < MQTT_MAX_NUM_OF_YOKIS_DEVICES; ++i)
         if (g_deviceStatusPollers[i]) g_deviceStatusPollers[i]->detach();
@@ -414,6 +422,7 @@ bool wifiDiag(const char* params) {
 }
 
 bool restart(const char* params) {
+    finishActiveHold();
 #ifdef MQTT_ENABLED
     if (g_mqtt) g_mqtt->disconnect();
 #endif
