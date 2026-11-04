@@ -1,9 +1,11 @@
-[![Build Status](https://travis-ci.org/nmaupu/yokis-hack.svg?branch=master)](https://travis-ci.org/nmaupu/yokis-hack)
+[![Verify reliability fixes](https://github.com/lecocotier/yokis-hack/actions/workflows/verify.yml/badge.svg?branch=master)](https://github.com/lecocotier/yokis-hack/actions/workflows/verify.yml)
 
 # yokis-hack
 
 For this installation's fork, see the [architecture and design choices](doc/architecture.md)
 and the [4 November 2026 source/upstream audit](doc/audit-2026-11-04.md).
+The [remaining fixes](doc/remaining-fixes-2026-11-04.md) distinguish reproduced
+defects from upstream reports and known hardware limits.
 
 Local deployment settings belong in `platformio.local.ini` (copy
 `platformio.local.example.ini`), which is excluded from Git. Never put real
@@ -64,11 +66,11 @@ dRestore lamp|6f4d|2d|00|00|490020|9f84|0000
 - Make a backup of your configuration using the command `dConfigFS` (copy the content of the command's result somewhere safe)
 - Upgrade using OTA or with `esptools.py`
 - In case of issue with your config, restore it line by line using the command `dRestore`
-- In case of weird bug (module stops functioning, weird stuff in the Serial, etc.), you need to completely erase the flash of the ESP8266 and reburn the firmware.
-  Erase can be done with:
-  ```
-  esptool.py -p /dev/<serial_port> erase_flash
-  ```
+- If the module fails to boot, preserve serial logs and saved configuration,
+  then investigate before choosing a recovery procedure. A normal firmware
+  upgrade does not require erasing the whole flash or uploading a filesystem.
+  Full flash erasure also removes persistent configuration and is reserved for
+  deliberate recovery after the required backups have been secured.
   
 
 ## Usage
@@ -107,7 +109,11 @@ For example, here are the pinout of my testing MCUs:
 
 ### Download and installation
 
-See releases.
+For this fork, build locally with PlatformIO and follow
+[local administration setup](doc/administration-locale.md). Public CI firmware
+does not include installation secrets; network administration stays disabled
+without its local keys. Native Windows/Linux tests are described in
+[tests/README.md](tests/README.md).
 
 Tools needed: https://github.com/espressif/esptool
 

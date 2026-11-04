@@ -4,6 +4,11 @@ Base : `lecocotier/yokis-hack`, commit `a271a54ea50e20db381e7ff187702bc7b6ff0c55
 Cette branche ne fusionne pas le master de nmaupu. Elle corrige les défauts logiciels
 identifiés dans la revue, en conservant l'interface de l'installation existante.
 
+Ce document conserve la portée historique de cette branche. Les corrections
+ultérieures de novembre, l'intégration dans `master` et leurs validations sont
+décrites dans [l'audit actuel](audit-2026-11-04.md) ; les défauts encore ouverts
+sont listés [séparément](remaining-fixes-2026-11-04.md).
+
 ## Invariants conservés
 
 - Volet individuel : ouverture `B9`, fermeture `FA`, arrêt `1A`, deuxième octet
@@ -13,7 +18,7 @@ identifiés dans la revue, en conservant l'interface de l'installation existante
 - Découverte Home Assistant sous `homeassistant/cover/<nom>/config` et identifiants
   existants. Les éclairages restent déclarés comme auparavant.
 - Conservation du format des fichiers `/yokis.conf` et `/mqtt.conf`.
-- Ni authentification réseau ajoutée, ni changement de puissance RF, ni délai de
+- Dans cette première branche, ni authentification réseau ajoutée, ni changement de puissance RF, ni délai de
   garde arbitraire de 60 ms, ni remplacement de la séquence TX/RX historique.
 
 ## Corrections
@@ -60,9 +65,12 @@ compteurs sont initialisés. Les délais emploient une différence non signée s
 32 bits, y compris lors du débordement de `millis()`.
 
 Les traces série/Telnet ont été retirées des callbacks d'interruption.
-Le correctif de protection des transactions SPI n'a pas pu être publié :
+Lors de cette première passe, le correctif de protection SPI n'avait pas pu être publié :
 l'outil de publication a bloqué cette écriture. Le pilote `RF24_forked.cpp`
-reste donc celui de la base et cette protection reste un point ouvert.
+restait alors celui de la base. Ce point a ensuite été corrigé en novembre par
+la garde sauvegardant l'état des interruptions et le transport IRQ dédié ; les
+deux ELF ESP8266 sont contrôlés. Le blocage initial de publication est conservé
+ici comme historique, pas comme état actuel de `master`.
 Le passage TX vers RX dans l'ISR est conservé pour ne pas reconstruire sans
 mesure une séquence temporelle spécifique. Une vérification des chronogrammes et
 des chemins IRAM sur matériel reste nécessaire : les tests sur PC ne la remplacent pas.
@@ -95,8 +103,9 @@ Les changements de configuration HTTP sont validés intégralement puis appliqu�
 depuis la boucle principale, pas depuis le callback AsyncTCP. Les champs omis
 conservent leur valeur. Les ports sont numériques et compris entre 1 et 65535.
 Une réponse HTTP 202 signifie « mise en attente », pas « sauvegarde déjà réussie ».
-Le résultat d'application est indiqué sur la console. Le formulaire n'ajoute pas
-d'authentification dans cette branche. Le formatage automatique au montage
+Le résultat d'application est indiqué sur la console. Le formulaire de cette
+première branche n'ajoutait pas d'authentification ; le `master` actuel utilise
+authentification, POST et CSRF, et ne renvoie plus les mots de passe. Le formatage automatique au montage
 LittleFS est maintenant désactivé pour protéger une configuration illisible.
 
 Les chaînes MQTT sont toujours terminées et les valeurs trop longues sont
