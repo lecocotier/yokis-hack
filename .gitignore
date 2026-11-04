@@ -18,3 +18,4 @@
 /include/local_secrets.h
 /local/
 /.tools/
+__pycache__/

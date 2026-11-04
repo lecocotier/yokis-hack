@@ -18,7 +18,7 @@
 #ifndef __RF24_FORKED_H__
 #define __RF24_FORKED_H__
 
-#include <RF24.h>
+#include "RF/legacyTypes.h"
 #include <RF24_config.h>
 
 #if defined(RF24_LINUX) || defined(LITTLEWIRE)

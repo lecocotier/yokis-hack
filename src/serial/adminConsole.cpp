@@ -1,3 +1,4 @@
+#ifdef ESP8266
 #include "serial/adminConsole.h"
 
 #include <cstring>
@@ -346,3 +347,4 @@ void AdminConsole::setCallbackOnConnect(void (*callback)()) {
 void AdminConsole::setCallbackOnDisconnect(void (*callback)()) {
     disconnectCallback_ = callback;
 }
+#endif // ESP8266

@@ -2,7 +2,6 @@
 #define __PAIRING_RF_H__
 
 #include <Arduino.h>
-#include <RF24.h>
 #include <nRF24L01.h>
 #include "RF/configurator.h"
 
