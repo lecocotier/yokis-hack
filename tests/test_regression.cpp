@@ -38,6 +38,7 @@ std::string published(const char* topic) {
 void pollReply(Device* d,uint8_t a,uint8_t b){testRadio.replies.push_back({a,b});pollForStatus(d);}
 #include "poststop_cases.h"
 #include "network_cases.h"
+#include "failure_cases.h"
 int main(){
  // A mount failure must not autoformat stored RF/MQTT parameters.
  testFs.files["/keep.conf"]=std::make_shared<std::string>("pairing backup");
@@ -255,6 +256,7 @@ int main(){
  // Full table used by dConfig must be bounded, with no sentinel past slot 63.
  for(int i=1;i<64;++i){g_devices[i]=d;}CHECK(displayDevices(nullptr));for(int i=1;i<64;++i){g_devices[i]=nullptr;}
 
+ testFailureRecovery(d);
  testPostStopPolling(d, wifi);
  testNetwork(d, wifi);
 

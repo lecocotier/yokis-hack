@@ -3,6 +3,19 @@
 #include "globals.h"
 #include "reliability.h"
 
+namespace {
+// Pair/copy borrow the physical NRF only for their operation. Restore both
+// routing and radio registers: changing irqType alone leaves the pairing setup.
+void resumeDeviceRadio() {
+    if (g_pairingRF) g_pairingRF->ce(LOW);
+    IrqManager::irqType = E2BP;
+    if (g_bp && g_bp->getDevice() && g_bp->getDevice()->isConfigured()) {
+        g_bp->reset();
+        g_bp->setupRFModule();
+    }
+}
+}
+
 // Serial and Telnet share the same validated command handlers. Callbacks run
 // from the main loop; only the selected RF helper may own the physical NRF.
 void registerAllCallbacks() {
@@ -130,6 +143,7 @@ bool pairingCallback(const char*) {
 
         g_currentDevice->toSerial();
     }
+    resumeDeviceRadio();
     return res;
 }
 
@@ -161,10 +175,12 @@ bool changeDeviceState(const char* params, bool (E2bp::*func)(void)) {
     IrqManager::irqType = E2BP;
     g_bp->setDevice(d);
     bool ret = (g_bp->*func)();
+    if (!ret) d->setStatus(UNDEFINED);
 #if defined(ESP8266) && defined(MQTT_ENABLED)
-    if (ret) {
+    if (g_mqtt) {
         if (d->getMode() == DIMMER) {
-            g_mqtt->notifyBrightness(d);
+            if (ret) g_mqtt->notifyBrightness(d);
+            else g_mqtt->notifyPower(d, UNDEFINED);
         } else {
             g_mqtt->notifyPower(d);
         }
@@ -219,7 +235,9 @@ bool copyCallback(const char* params) {
 
     IrqManager::irqType = COPYING;
     g_copy->setDevice(d);
-    return g_copy->send();
+    const bool copied = g_copy->send();
+    resumeDeviceRadio();
+    return copied;
 }
 
 bool displayDevices(const char*) {
