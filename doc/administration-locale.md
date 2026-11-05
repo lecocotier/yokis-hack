@@ -7,6 +7,14 @@ les clés existantes ; les consulter directement dans l'éditeur, sans les copie
 dans un ticket ou une commande enregistrée. Les identifiants WiFi/MQTT déjà
 enregistrés sur la carte ne sont pas remplacés par cette opération.
 
+L'outil OTA du projet est activé. Les options d'authentification résident dans
+`[ota_private:d1_mini_ota]`, séparées de `[env:d1_mini_ota]` qui conserve la
+destination. Le script de préparation migre les anciens flags sans remplacer
+la clé du firmware installé par une éventuelle nouvelle clé du header. Il
+refuse deux jeux de flags contradictoires afin de préserver leur contenu.
+Un port d'écoute 0 choisit un port libre ; un port explicite reste respecté.
+La compilation configure l'outil sans lancer de téléversement.
+
 La page HTTP demande l'utilisateur `admin` et la clé HTTP. Toute modification
 utilise POST et le jeton du formulaire. Un champ mot de passe vide conserve
 l'ancienne valeur ; la case d'effacement est nécessaire pour la supprimer.
