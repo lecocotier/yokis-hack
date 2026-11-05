@@ -39,7 +39,7 @@ Les volets restent commandés en mode optimiste dans Home Assistant. La traducti
 
 ## Pourquoi ces octets et ces temporisations radio
 
-Les commandes individuelles de volet conservent `B9` pour ouvrir, `FA` pour fermer et `1A` pour arrêter. Le deuxième octet est `06`, et le quatrième reste `00`. Le nouveau mode bus explicite utilise `16` et `20` sur la route d'un volet d'entrée enregistré ; il ne remplace jamais une trame individuelle. Voir [la configuration et les limites du bus](upstream-integration-2026-11-04.md).
+Les commandes individuelles de volet conservent `B9` pour ouvrir, `FA` pour fermer et `1A` pour arrêter. Le deuxième octet est `06`, et le quatrième reste `00`. Le nouveau mode bus explicite utilise `16` et `20` sur la route d'un volet d'entrée enregistré ; il ne remplace jamais une trame individuelle. Voir [la configuration et les limites du bus](bus-debug-diagnostics.md).
 
 La bascule TX/RX, les écritures directes de registres et les délais dans `E2bp` proviennent des captures historiques. Remplacer une écriture par une méthode de plus haut niveau peut ajouter des lectures SPI, changer les interruptions effacées ou insérer un délai. Une refonte exige des mesures, pas uniquement une compilation.
 
@@ -104,5 +104,4 @@ Le contrôle du binaire lié suit les appels, sauts indirects résolus et litté
 de l'ISR ; les pointeurs d'objets à l'exécution et les chronogrammes matériels
 restent des hypothèses à vérifier sur carte. La configuration de l'administration
 est décrite dans [administration locale](administration-locale.md), et les limites
-de l'identification dans [provenance des builds](build-provenance.md). L'état des
-correctifs et les preuves sont dans [l'audit](audit-2026-11-04.md).
+de l'identification dans [provenance des builds](build-provenance.md). Les moyens de validation sont décrits dans [le guide des tests](../tests/README.md).

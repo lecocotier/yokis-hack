@@ -4,10 +4,8 @@ Base : `lecocotier/yokis-hack`, commit `a271a54ea50e20db381e7ff187702bc7b6ff0c55
 Cette branche ne fusionne pas le master de nmaupu. Elle corrige les défauts logiciels
 identifiés dans la revue, en conservant l'interface de l'installation existante.
 
-Ce document conserve la portée historique de cette branche. Les corrections
-ultérieures de novembre, l'intégration dans `master` et leurs validations sont
-décrites dans [l'audit actuel](audit-2026-11-04.md) ; les défauts encore ouverts
-sont listés [séparément](remaining-fixes-2026-11-04.md).
+Ce document décrit cette branche historique. Pour le fonctionnement actuel,
+voir [l’architecture](architecture.md) et [le guide du bus](bus-debug-diagnostics.md).
 
 ## Invariants conservés
 
@@ -46,7 +44,6 @@ Les deux réponses simples `00 00` et `01 00` ne prouvent pas à elles seules un
 fin de course sur toutes les variantes. La révision `2026.09-shutter-context-1`
 réintègre l'estimation contextuelle du patch local : STOP récent, arrêt mémorisé,
 fin de course supposée sinon. L'estimation est distinguée du retour radio riche.
-Voir [la note de réintégration et ses limites](shutter-context-2026-09-12.md).
 Les masques historiques plus riches sont conservés ; aucun masquage arbitraire
 des bits `40/80` n'est appliqué.
 

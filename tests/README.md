@@ -45,7 +45,6 @@ Network addition: the production Wi-Fi module is now compiled too. Run
 `bash tests/run_native.sh` (host default -O0; HOST_OPTIMIZATION can override),
 without a separate JSON invocation (the common runner includes it). Network interfaces remain simulated;
 the declared will is checked at the PubSubClient API, not on a real broker.
-See `doc/network-availability-2026-09-12.md` for target commissioning.
 
 Audit regressions also cover failure recovery, cooperative dimmer holds,
 authenticated HTTP POST/CSRF, preservation/explicit clearing of passwords,

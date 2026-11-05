@@ -2,12 +2,8 @@
 
 # yokis-hack
 
-For this installation's fork, see the [architecture and design choices](doc/architecture.md)
-and the [4 November 2026 source/upstream audit](doc/audit-2026-11-04.md).
-The [remaining fixes](doc/remaining-fixes-2026-11-04.md) distinguish reproduced
-defects from upstream reports and known hardware limits.
-See the [2026 upstream integration and bus guide](doc/upstream-integration-2026-11-04.md)
-for the debug levels, protected dashboard and bus configuration.
+See the [architecture and design choices](doc/architecture.md) and the
+[bus, debug levels and diagnostic guide](doc/bus-debug-diagnostics.md).
 
 Local deployment settings belong in `platformio.local.ini` (copy
 `platformio.local.example.ini`), which is excluded from Git. Never put real
